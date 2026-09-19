@@ -1,8 +1,8 @@
 import streamlit as st
 
-# ---------------------------------------------------------
-# CONFIGURATION DE LA PAGE
-# ---------------------------------------------------------
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
 st.set_page_config(
     page_title="Chasseur Immo",
@@ -10,35 +10,96 @@ st.set_page_config(
     layout="wide"
 )
 
-# ---------------------------------------------------------
-# PAGE PRINCIPALE
-# ---------------------------------------------------------
+# ============================================================
+# MENU
+# ============================================================
 
-st.title("🏠 Chasseur Immo")
+st.sidebar.title("🏠 Chasseur Immo")
 
-st.subheader("Application de recherche et de matching immobilier")
-
-st.write(
-    "Bienvenue dans votre outil de gestion des mandats de recherche."
+page = st.sidebar.radio(
+    "Navigation",
+    [
+        "🏠 Tableau de bord",
+        "👤 Acquéreurs",
+        "📋 Annonces",
+        "🎯 Matching"
+    ]
 )
 
-# ---------------------------------------------------------
-# MENU TEMPORAIRE
-# ---------------------------------------------------------
+st.sidebar.markdown("---")
+st.sidebar.caption("Application en construction")
 
-st.sidebar.title("Navigation")
+# ============================================================
+# TABLEAU DE BORD
+# ============================================================
 
-st.sidebar.info(
-    "🚧 Application en construction"
-)
+if page == "🏠 Tableau de bord":
 
-st.markdown("---")
+    st.title("🏠 Tableau de bord")
 
-st.success(
-    "✅ La première version de l'application est prête."
-)
+    st.write(
+        "Bienvenue dans votre espace de recherche immobilière."
+    )
 
-st.write(
-    "Les prochaines étapes seront la connexion à Supabase, "
-    "la création des fiches acquéreurs et le moteur de matching."
-)
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric(
+            "Acquéreurs",
+            "0"
+        )
+
+    with col2:
+        st.metric(
+            "Annonces",
+            "0"
+        )
+
+    with col3:
+        st.metric(
+            "Matches",
+            "0"
+        )
+
+    st.markdown("---")
+
+    st.info(
+        "Les statistiques seront automatiquement alimentées "
+        "par Supabase."
+    )
+
+# ============================================================
+# ACQUEREURS
+# ============================================================
+
+elif page == "👤 Acquéreurs":
+
+    st.title("👤 Acquéreurs")
+
+    st.info(
+        "La gestion des fiches acquéreurs sera construite ici."
+    )
+
+# ============================================================
+# ANNONCES
+# ============================================================
+
+elif page == "📋 Annonces":
+
+    st.title("📋 Annonces")
+
+    st.info(
+        "Les annonces immobilières seront affichées ici."
+    )
+
+# ============================================================
+# MATCHING
+# ============================================================
+
+elif page == "🎯 Matching":
+
+    st.title("🎯 Matching")
+
+    st.info(
+        "Le moteur de matching sera construit ici."
+    )
