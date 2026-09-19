@@ -1,4 +1,5 @@
 import streamlit as st
+from supabase import create_client, Client
 
 # ============================================================
 # CONFIGURATION
@@ -9,6 +10,20 @@ st.set_page_config(
     page_icon="🏠",
     layout="wide"
 )
+
+# ============================================================
+# CONNEXION SUPABASE
+# ============================================================
+
+@st.cache_resource
+def init_supabase() -> Client:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+
+    return create_client(url, key)
+
+
+supabase = init_supabase()
 
 # ============================================================
 # MENU
@@ -41,32 +56,58 @@ if page == "🏠 Tableau de bord":
         "Bienvenue dans votre espace de recherche immobilière."
     )
 
-    col1, col2, col3 = st.columns(3)
+    try:
+        acquereurs = supabase.table("acquereurs").select(
+            "id",
+            count="exact"
+        ).execute()
 
-    with col1:
-        st.metric(
-            "Acquéreurs",
-            "0"
+        annonces = supabase.table("annonces").select(
+            "id",
+            count="exact"
+        ).execute()
+
+        matches = supabase.table("matches").select(
+            "id",
+            count="exact"
+        ).execute()
+
+        nb_acquereurs = acquereurs.count or 0
+        nb_annonces = annonces.count or 0
+        nb_matches = matches.count or 0
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric(
+                "Acquéreurs",
+                nb_acquereurs
+            )
+
+        with col2:
+            st.metric(
+                "Annonces",
+                nb_annonces
+            )
+
+        with col3:
+            st.metric(
+                "Matches",
+                nb_matches
+            )
+
+        st.success(
+            "✅ Connexion à Supabase réussie."
         )
 
-    with col2:
-        st.metric(
-            "Annonces",
-            "0"
+    except Exception as e:
+
+        st.error(
+            "❌ Impossible de se connecter à Supabase."
         )
 
-    with col3:
-        st.metric(
-            "Matches",
-            "0"
-        )
+        st.write(str(e))
 
-    st.markdown("---")
-
-    st.info(
-        "Les statistiques seront automatiquement alimentées "
-        "par Supabase."
-    )
 
 # ============================================================
 # ACQUEREURS
@@ -80,6 +121,7 @@ elif page == "👤 Acquéreurs":
         "La gestion des fiches acquéreurs sera construite ici."
     )
 
+
 # ============================================================
 # ANNONCES
 # ============================================================
@@ -91,6 +133,7 @@ elif page == "📋 Annonces":
     st.info(
         "Les annonces immobilières seront affichées ici."
     )
+
 
 # ============================================================
 # MATCHING
