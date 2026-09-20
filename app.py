@@ -9,23 +9,11 @@ get_matches
 
 from matching import matcher_tous_les_acquereurs
 
-# ============================================================
-
-# CONFIGURATION
-
-# ============================================================
-
 st.set_page_config(
 page_title="Chasseur Immo",
 page_icon="🏠",
 layout="wide"
 )
-
-# ============================================================
-
-# MENU
-
-# ============================================================
 
 st.sidebar.title("🏠 Chasseur Immo")
 
@@ -672,24 +660,17 @@ if st.button(
                     ]
 
                     match_data = {
-                        "acquereur_id":
-                            acquereur["id"],
-                        "annonce_id":
-                            annonce["id"],
-                        "statut_matching":
-                            resultat[
-                                "statut_matching"
-                            ],
-                        "score":
-                            resultat["score"],
-                        "details_matching":
-                            resultat[
-                                "details_matching"
-                            ],
-                        "statut":
-                            "nouveau",
-                        "alerte_envoyee":
-                            False
+                        "acquereur_id": acquereur["id"],
+                        "annonce_id": annonce["id"],
+                        "statut_matching": resultat[
+                            "statut_matching"
+                        ],
+                        "score": resultat["score"],
+                        "details_matching": resultat[
+                            "details_matching"
+                        ],
+                        "statut": "nouveau",
+                        "alerte_envoyee": False
                     }
 
                     supabase.table(
@@ -718,23 +699,17 @@ if st.button(
                     if statut == "correspondance":
 
                         emoji = "🟢"
-                        titre_statut = (
-                            "Correspondance"
-                        )
+                        titre_statut = "Correspondance"
 
                     elif statut == "a_verifier":
 
                         emoji = "🟠"
-                        titre_statut = (
-                            "À vérifier"
-                        )
+                        titre_statut = "À vérifier"
 
                     else:
 
                         emoji = "🔴"
-                        titre_statut = (
-                            "Écarté"
-                        )
+                        titre_statut = "Écarté"
 
                     st.markdown(
                         f"### {emoji} "
@@ -754,22 +729,19 @@ if st.button(
                         if detail["statut"] == "correspondance":
 
                             st.success(
-                                "✅ "
-                                + detail["message"]
+                                "✅ " + detail["message"]
                             )
 
                         elif detail["statut"] == "a_verifier":
 
                             st.warning(
-                                "⚠️ "
-                                + detail["message"]
+                                "⚠️ " + detail["message"]
                             )
 
                         else:
 
                             st.error(
-                                "❌ "
-                                + detail["message"]
+                                "❌ " + detail["message"]
                             )
 
         except Exception as e:
@@ -910,9 +882,7 @@ try:
 
             else:
 
-                nom_acquereur = (
-                    "Acquéreur introuvable"
-                )
+                nom_acquereur = "Acquéreur introuvable"
 
             if annonce:
 
@@ -939,9 +909,7 @@ try:
 
                 else:
 
-                    prix_affichage = (
-                        "Prix non précisé"
-                    )
+                    prix_affichage = "Prix non précisé"
 
                 url_annonce = annonce.get(
                     "url"
@@ -949,14 +917,9 @@ try:
 
             else:
 
-                titre_annonce = (
-                    "Annonce introuvable"
-                )
-
+                titre_annonce = "Annonce introuvable"
                 commune_annonce = ""
-
                 prix_affichage = ""
-
                 url_annonce = None
 
             with st.container(border=True):
@@ -972,13 +935,11 @@ try:
                     )
 
                     st.write(
-                        f"**Statut :** "
-                        f"{titre_statut}"
+                        f"**Statut :** {titre_statut}"
                     )
 
                     st.write(
-                        f"**Annonce :** "
-                        f"{titre_annonce}"
+                        f"**Annonce :** {titre_annonce}"
                     )
 
                     if commune_annonce:
