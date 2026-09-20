@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 
 from database import (
@@ -104,10 +105,49 @@ page = st.sidebar.radio(
 
 
 # ============================================================
+# TEST YAHOO
+# ============================================================
+
+st.sidebar.divider()
+
+st.sidebar.subheader("📧 Connexion Yahoo")
+
+tester_yahoo = st.sidebar.button(
+    "🧪 Tester la connexion Yahoo",
+    use_container_width=True
+)
+
+if tester_yahoo:
+
+    try:
+
+        from email_import import get_yahoo_connection
+
+        mail = get_yahoo_connection()
+
+        st.sidebar.success(
+            "✅ Connexion Yahoo réussie !"
+        )
+
+        mail.logout()
+
+    except Exception as erreur:
+
+        st.sidebar.error(
+            "❌ La connexion Yahoo a échoué."
+        )
+
+        st.sidebar.code(
+            str(erreur)
+        )
+
+
+# ============================================================
 # OUTILS
 # ============================================================
 
 def afficher_statut(statut):
+
     if statut == "correspondance":
         return "🟢 Correspondance"
 
@@ -121,6 +161,7 @@ def afficher_statut(statut):
 
 
 def valeur_ou_vide(valeur):
+
     if valeur is None:
         return ""
 
@@ -136,6 +177,7 @@ if page == "🏠 Tableau de bord":
     st.title("🏠 Tableau de bord")
 
     try:
+
         acquereurs = get_acquereurs(actif=True)
         annonces = get_annonces()
         matches = get_matches()
@@ -161,24 +203,28 @@ if page == "🏠 Tableau de bord":
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
+
             st.metric(
                 "👤 Acquéreurs actifs",
                 len(acquereurs)
             )
 
         with col2:
+
             st.metric(
                 "🏡 Annonces",
                 len(annonces)
             )
 
         with col3:
+
             st.metric(
                 "🟢 Correspondances",
                 len(correspondances)
             )
 
         with col4:
+
             st.metric(
                 "🟠 À vérifier",
                 len(a_verifier)
@@ -189,20 +235,30 @@ if page == "🏠 Tableau de bord":
         st.subheader("Dernières annonces")
 
         if not annonces:
+
             st.info(
                 "Aucune annonce enregistrée pour le moment."
             )
+
         else:
+
             for annonce in annonces[:10]:
 
-                titre = annonce.get("titre") or "Annonce sans titre"
+                titre = (
+                    annonce.get("titre")
+                    or "Annonce sans titre"
+                )
+
                 prix = annonce.get("prix")
                 commune = annonce.get("commune") or ""
                 source = annonce.get("source") or ""
 
                 if prix is not None:
+
                     prix_affiche = f"{prix:,.0f} €"
+
                 else:
+
                     prix_affiche = "Prix non renseigné"
 
                 st.markdown(
@@ -224,14 +280,23 @@ if page == "🏠 Tableau de bord":
         st.subheader("Derniers matches")
 
         if not matches:
+
             st.info(
                 "Aucun matching réalisé pour le moment."
             )
+
         else:
+
             for match in matches[:10]:
 
-                statut = match.get("statut_matching")
-                score = match.get("score", 0)
+                statut = match.get(
+                    "statut_matching"
+                )
+
+                score = match.get(
+                    "score",
+                    0
+                )
 
                 st.write(
                     f"{afficher_statut(statut)} — "
@@ -244,7 +309,9 @@ if page == "🏠 Tableau de bord":
             "Une erreur est survenue lors du chargement du tableau de bord."
         )
 
-        st.code(str(erreur))
+        st.code(
+            str(erreur)
+        )
 
 
 # ============================================================
@@ -437,11 +504,13 @@ elif page == "👤 Acquéreurs":
         if submitted:
 
             if not prenom.strip():
+
                 st.error(
                     "Le prénom est obligatoire."
                 )
 
             elif not nom.strip():
+
                 st.error(
                     "Le nom est obligatoire."
                 )
@@ -459,14 +528,30 @@ elif page == "👤 Acquéreurs":
                     "recherche_pavillon": recherche_pavillon,
                     "recherche_maison_pierre": recherche_maison_pierre,
                     "plain_pied_obligatoire": plain_pied_obligatoire,
-                    "chambres_min": chambres_min if chambres_min > 0 else None,
-                    "chambres_rdc_min": chambres_rdc_min if chambres_rdc_min > 0 else None,
+                    "chambres_min": (
+                        chambres_min
+                        if chambres_min > 0
+                        else None
+                    ),
+                    "chambres_rdc_min": (
+                        chambres_rdc_min
+                        if chambres_rdc_min > 0
+                        else None
+                    ),
                     "salle_eau_rdc": salle_eau_rdc,
-                    "salles_eau_min": salles_eau_min if salles_eau_min > 0 else None,
+                    "salles_eau_min": (
+                        salles_eau_min
+                        if salles_eau_min > 0
+                        else None
+                    ),
                     "garage_obligatoire": garage_obligatoire,
                     "sous_sol_recherche": sous_sol_recherche,
                     "secteur": secteur.strip() or "Alençon",
-                    "rayon_km": rayon_km if rayon_km > 0 else None,
+                    "rayon_km": (
+                        rayon_km
+                        if rayon_km > 0
+                        else None
+                    ),
                     "surface_terrain_souhaitee": (
                         surface_terrain_souhaitee
                         if surface_terrain_souhaitee > 0
@@ -511,7 +596,9 @@ elif page == "👤 Acquéreurs":
                         "Erreur lors de l'enregistrement."
                     )
 
-                    st.code(str(erreur))
+                    st.code(
+                        str(erreur)
+                    )
 
     # --------------------------------------------------------
     # LISTE
@@ -523,7 +610,9 @@ elif page == "👤 Acquéreurs":
 
         try:
 
-            acquereurs = get_acquereurs(actif=True)
+            acquereurs = get_acquereurs(
+                actif=True
+            )
 
             if not acquereurs:
 
@@ -535,15 +624,31 @@ elif page == "👤 Acquéreurs":
 
                 for acquereur in acquereurs:
 
-                    prenom = acquereur.get("prenom", "")
-                    nom = acquereur.get("nom", "")
+                    prenom = acquereur.get(
+                        "prenom",
+                        ""
+                    )
 
-                    budget = acquereur.get("budget_max")
+                    nom = acquereur.get(
+                        "nom",
+                        ""
+                    )
+
+                    budget = acquereur.get(
+                        "budget_max"
+                    )
 
                     if budget:
-                        budget_affiche = f"{budget:,.0f} €"
+
+                        budget_affiche = (
+                            f"{budget:,.0f} €"
+                        )
+
                     else:
-                        budget_affiche = "Non renseigné"
+
+                        budget_affiche = (
+                            "Non renseigné"
+                        )
 
                     with st.expander(
                         f"👤 {prenom} {nom}"
@@ -591,7 +696,9 @@ elif page == "👤 Acquéreurs":
                 "Impossible de charger les acquéreurs."
             )
 
-            st.code(str(erreur))
+            st.code(
+                str(erreur)
+            )
 
 
 # ============================================================
@@ -778,15 +885,36 @@ elif page == "🏡 Annonces":
                         "titre": titre.strip(),
                         "url": url.strip(),
                         "source": source.strip(),
-                        "prix": prix if prix > 0 else None,
+                        "prix": (
+                            prix
+                            if prix > 0
+                            else None
+                        ),
                         "commune": commune.strip(),
-                        "latitude": latitude if latitude != 0 else None,
-                        "longitude": longitude if longitude != 0 else None,
-                        "type_maison": type_maison or None,
+                        "latitude": (
+                            latitude
+                            if latitude != 0
+                            else None
+                        ),
+                        "longitude": (
+                            longitude
+                            if longitude != 0
+                            else None
+                        ),
+                        "type_maison": (
+                            type_maison
+                            or None
+                        ),
                         "plain_pied": plain_pied,
                         "maison_pierre": maison_pierre,
-                        "pavillon": type_maison == "pavillon",
-                        "chambres": chambres if chambres > 0 else None,
+                        "pavillon": (
+                            type_maison == "pavillon"
+                        ),
+                        "chambres": (
+                            chambres
+                            if chambres > 0
+                            else None
+                        ),
                         "chambres_rdc": (
                             chambres_rdc
                             if chambres_rdc > 0
@@ -843,15 +971,23 @@ elif page == "🏡 Annonces":
 
                         for resultat in resultats:
 
-                            acquereur = resultat["acquereur"]
+                            acquereur = resultat[
+                                "acquereur"
+                            ]
 
                             match_data = {
-                                "acquereur_id": acquereur["id"],
-                                "annonce_id": annonce["id"],
+                                "acquereur_id": acquereur[
+                                    "id"
+                                ],
+                                "annonce_id": annonce[
+                                    "id"
+                                ],
                                 "statut_matching": resultat[
                                     "statut_matching"
                                 ],
-                                "score": resultat["score"],
+                                "score": resultat[
+                                    "score"
+                                ],
                                 "details_matching": resultat[
                                     "details_matching"
                                 ],
@@ -918,7 +1054,9 @@ elif page == "🏡 Annonces":
                     "Une erreur est survenue."
                 )
 
-                st.code(str(erreur))
+                st.code(
+                    str(erreur)
+                )
 
 
 # ============================================================
@@ -938,7 +1076,9 @@ elif page == "🎯 Matching":
 
         matches = get_matches()
         annonces = get_annonces()
-        acquereurs = get_acquereurs(actif=False)
+        acquereurs = get_acquereurs(
+            actif=False
+        )
 
         annonces_dict = {
             annonce["id"]: annonce
@@ -961,17 +1101,20 @@ elif page == "🎯 Matching":
             col1, col2, col3, col4 = st.columns(4)
 
             correspondances = [
-                m for m in matches
+                m
+                for m in matches
                 if m.get("statut_matching") == "correspondance"
             ]
 
             a_verifier = [
-                m for m in matches
+                m
+                for m in matches
                 if m.get("statut_matching") == "a_verifier"
             ]
 
             ecartes = [
-                m for m in matches
+                m
+                for m in matches
                 if m.get("statut_matching") == "ecarte"
             ]
 
@@ -1191,4 +1334,7 @@ elif page == "🎯 Matching":
             "Impossible de charger les résultats de matching."
         )
 
-        st.code(str(erreur))
+        st.code(
+            str(erreur)
+        )
+```
