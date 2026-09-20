@@ -14,85 +14,64 @@ st.write(
 "sur la boîte Yahoo connectée à Chasseur Immo."
 )
 
-if st.button(
-"📥 Lire les derniers emails Bien'ici",
-use_container_width=True
-):
+if st.button("📥 Lire les derniers emails Bien'ici", use_container_width=True):
+
+emails = None
+erreur = None
 
 try:
     emails = get_bienici_emails(limit=20)
+except Exception as e:
+    erreur = e
 
-    if not emails:
-        st.info("Aucun email Bien'ici trouvé.")
+if erreur is not None:
 
-    else:
-        st.success(
-            f"✅ {len(emails)} email(s) Bien'ici trouvé(s)."
-        )
+    st.error("❌ Impossible de lire les emails Bien'ici.")
 
-        for email_data in emails:
-
-            subject = email_data.get(
-                "subject",
-                "Sans objet"
-            )
-
-            sender = email_data.get(
-                "sender",
-                ""
-            )
-
-            date = email_data.get(
-                "date",
-                ""
-            )
-
-            with st.expander(f"📧 {subject}"):
-
-                st.write(
-                    f"**Expéditeur :** {sender}"
-                )
-
-                st.write(
-                    f"**Date :** {date}"
-                )
-
-                st.divider()
-
-                text_body = email_data.get(
-                    "text_body",
-                    ""
-                )
-
-                html_body = email_data.get(
-                    "html_body",
-                    ""
-                )
-
-                if text_body:
-
-                    st.subheader("Contenu texte")
-                    st.text(text_body)
-
-                elif html_body:
-
-                    st.subheader("Contenu HTML")
-                    st.html(html_body)
-
-                else:
-
-                    st.info(
-                        "Le contenu de cet email n'a pas pu être lu."
-                    )
-
-except Exception as erreur:
-
-    st.error(
-        "❌ Impossible de lire les emails Bien'ici."
-    )
-
-    st.write(
-        "Détail de l'erreur :"
-    )
+    st.write("Détail de l'erreur :")
 
     st.code(str(erreur))
+
+elif not emails:
+
+    st.info("Aucun email Bien'ici trouvé.")
+
+else:
+
+    st.success(
+        f"✅ {len(emails)} email(s) Bien'ici trouvé(s)."
+    )
+
+    for email_data in emails:
+
+        subject = email_data.get("subject", "Sans objet")
+        sender = email_data.get("sender", "")
+        date = email_data.get("date", "")
+        text_body = email_data.get("text_body", "")
+        html_body = email_data.get("html_body", "")
+
+        with st.expander(f"📧 {subject}"):
+
+            st.write(f"**Expéditeur :** {sender}")
+
+            st.write(f"**Date :** {date}")
+
+            st.divider()
+
+            if text_body:
+
+                st.subheader("Contenu texte")
+
+                st.text(text_body)
+
+            elif html_body:
+
+                st.subheader("Contenu HTML")
+
+                st.html(html_body)
+
+            else:
+
+                st.info(
+                    "Le contenu de cet email n'a pas pu être lu."
+                )
