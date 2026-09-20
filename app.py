@@ -1,956 +1,1194 @@
 import streamlit as st
 
 from database import (
-supabase,
-get_acquereurs,
-get_annonces,
-get_matches
+    get_acquereurs,
+    get_annonces,
+    get_matches,
+    insert_annonce,
+    insert_match,
 )
 
 from matching import matcher_tous_les_acquereurs
 
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
 st.set_page_config(
-page_title="Chasseur Immo",
-page_icon="🏠",
-layout="wide"
+    page_title="Chasseur Immo",
+    page_icon="🏡",
+    layout="wide"
 )
 
+
+# ============================================================
+# STYLE
 # ============================================================
 
+st.markdown(
+    """
+    <style>
+        .main {
+            background-color: #f7f8fa;
+        }
+
+        .block-container {
+            padding-top: 2rem;
+            padding-bottom: 3rem;
+        }
+
+        .card {
+            background: white;
+            padding: 1.2rem;
+            border-radius: 12px;
+            border: 1px solid #e5e7eb;
+            margin-bottom: 1rem;
+        }
+
+        .success-card {
+            background: #ecfdf5;
+            border-left: 5px solid #10b981;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .warning-card {
+            background: #fffbeb;
+            border-left: 5px solid #f59e0b;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .danger-card {
+            background: #fef2f2;
+            border-left: 5px solid #ef4444;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .small-text {
+            color: #6b7280;
+            font-size: 0.9rem;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# ============================================================
+# TITRE
+# ============================================================
+
+st.title("🏡 Chasseur Immo")
+st.caption("Recherche et matching immobilier")
+
+
+# ============================================================
 # MENU
-
 # ============================================================
-
-st.sidebar.title("🏠 Chasseur Immo")
 
 page = st.sidebar.radio(
-"Navigation",
-[
-"🏠 Tableau de bord",
-"👤 Acquéreurs",
-"📋 Annonces",
-"🎯 Matching"
-]
+    "Navigation",
+    [
+        "🏠 Tableau de bord",
+        "👤 Acquéreurs",
+        "🏡 Annonces",
+        "🎯 Matching"
+    ]
 )
 
-st.sidebar.markdown("---")
-st.sidebar.caption("Recherche immobilière")
 
 # ============================================================
+# OUTILS
+# ============================================================
 
+def afficher_statut(statut):
+    if statut == "correspondance":
+        return "🟢 Correspondance"
+
+    if statut == "a_verifier":
+        return "🟠 À vérifier"
+
+    if statut == "ecarte":
+        return "🔴 Écarté"
+
+    return statut
+
+
+def valeur_ou_vide(valeur):
+    if valeur is None:
+        return ""
+
+    return valeur
+
+
+# ============================================================
 # TABLEAU DE BORD
-
 # ============================================================
 
 if page == "🏠 Tableau de bord":
 
-```
-st.title("🏠 Chasseur Immo")
+    st.title("🏠 Tableau de bord")
 
-st.subheader("Tableau de bord")
+    try:
+        acquereurs = get_acquereurs(actif=True)
+        annonces = get_annonces()
+        matches = get_matches()
 
-try:
+        correspondances = [
+            match
+            for match in matches
+            if match.get("statut_matching") == "correspondance"
+        ]
 
-    acquereurs = get_acquereurs(actif=False)
-    annonces = get_annonces()
-    matches = get_matches()
+        a_verifier = [
+            match
+            for match in matches
+            if match.get("statut_matching") == "a_verifier"
+        ]
 
-    nb_acquereurs = len(acquereurs)
-    nb_annonces = len(annonces)
-    nb_matches = len(matches)
+        ecartes = [
+            match
+            for match in matches
+            if match.get("statut_matching") == "ecarte"
+        ]
 
-    nb_correspondances = sum(
-        1
-        for match in matches
-        if match.get("statut_matching") == "correspondance"
-    )
+        col1, col2, col3, col4 = st.columns(4)
 
-    nb_a_verifier = sum(
-        1
-        for match in matches
-        if match.get("statut_matching") == "a_verifier"
-    )
+        with col1:
+            st.metric(
+                "👤 Acquéreurs actifs",
+                len(acquereurs)
+            )
 
-    nb_ecartes = sum(
-        1
-        for match in matches
-        if match.get("statut_matching") == "ecarte"
-    )
+        with col2:
+            st.metric(
+                "🏡 Annonces",
+                len(annonces)
+            )
 
-    col1, col2, col3 = st.columns(3)
+        with col3:
+            st.metric(
+                "🟢 Correspondances",
+                len(correspondances)
+            )
 
-    with col1:
-        st.metric(
-            "👤 Acquéreurs",
-            nb_acquereurs
+        with col4:
+            st.metric(
+                "🟠 À vérifier",
+                len(a_verifier)
+            )
+
+        st.divider()
+
+        st.subheader("Dernières annonces")
+
+        if not annonces:
+            st.info(
+                "Aucune annonce enregistrée pour le moment."
+            )
+        else:
+            for annonce in annonces[:10]:
+
+                titre = annonce.get("titre") or "Annonce sans titre"
+                prix = annonce.get("prix")
+                commune = annonce.get("commune") or ""
+                source = annonce.get("source") or ""
+
+                if prix is not None:
+                    prix_affiche = f"{prix:,.0f} €"
+                else:
+                    prix_affiche = "Prix non renseigné"
+
+                st.markdown(
+                    f"""
+                    <div class="card">
+                        <h4>{titre}</h4>
+                        <p>
+                            <strong>{prix_affiche}</strong>
+                            &nbsp; | &nbsp;
+                            {commune}
+                            &nbsp; | &nbsp;
+                            {source}
+                        </p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+        st.subheader("Derniers matches")
+
+        if not matches:
+            st.info(
+                "Aucun matching réalisé pour le moment."
+            )
+        else:
+            for match in matches[:10]:
+
+                statut = match.get("statut_matching")
+                score = match.get("score", 0)
+
+                st.write(
+                    f"{afficher_statut(statut)} — "
+                    f"Score : {score}%"
+                )
+
+    except Exception as erreur:
+
+        st.error(
+            "Une erreur est survenue lors du chargement du tableau de bord."
         )
 
-    with col2:
-        st.metric(
-            "🏠 Annonces",
-            nb_annonces
-        )
+        st.code(str(erreur))
 
-    with col3:
-        st.metric(
-            "🎯 Matches",
-            nb_matches
-        )
-
-    st.markdown("---")
-
-    st.subheader("État du matching")
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.metric(
-            "🟢 Correspondances",
-            nb_correspondances
-        )
-
-    with col2:
-        st.metric(
-            "🟠 À vérifier",
-            nb_a_verifier
-        )
-
-    with col3:
-        st.metric(
-            "🔴 Écartés",
-            nb_ecartes
-        )
-
-    st.success(
-        "✅ Connexion à Supabase opérationnelle."
-    )
-
-except Exception as e:
-
-    st.error(
-        "❌ Erreur lors du chargement du tableau de bord."
-    )
-
-    st.write(str(e))
-```
 
 # ============================================================
-
 # ACQUEREURS
-
 # ============================================================
 
 elif page == "👤 Acquéreurs":
 
-```
-st.title("👤 Acquéreurs")
+    st.title("👤 Acquéreurs")
 
-st.write(
-    "Créez le cahier des charges de votre acquéreur."
-)
-
-st.subheader("Identité")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    prenom = st.text_input(
-        "Prénom *"
+    onglet_creation, onglet_liste = st.tabs(
+        [
+            "➕ Ajouter un acquéreur",
+            "📋 Liste des acquéreurs"
+        ]
     )
 
-with col2:
-    nom = st.text_input(
-        "Nom *"
-    )
+    # --------------------------------------------------------
+    # CREATION
+    # --------------------------------------------------------
 
-col1, col2 = st.columns(2)
+    with onglet_creation:
 
-with col1:
-    telephone = st.text_input(
-        "Téléphone"
-    )
+        st.subheader("Créer un acquéreur")
 
-with col2:
-    email = st.text_input(
-        "Email"
-    )
+        with st.form("form_acquereur"):
 
-st.subheader("🏠 Type de bien")
+            col1, col2 = st.columns(2)
 
-col1, col2, col3 = st.columns(3)
+            with col1:
 
-with col1:
-    recherche_maison = st.checkbox(
-        "Maison"
-    )
+                prenom = st.text_input(
+                    "Prénom *"
+                )
 
-with col2:
-    recherche_pavillon = st.checkbox(
-        "Pavillon"
-    )
+                nom = st.text_input(
+                    "Nom *"
+                )
 
-with col3:
-    recherche_maison_pierre = st.checkbox(
-        "Maison en pierre"
-    )
+                telephone = st.text_input(
+                    "Téléphone"
+                )
 
-st.subheader("🛏️ Critères")
+            with col2:
 
-col1, col2 = st.columns(2)
+                email = st.text_input(
+                    "Email"
+                )
 
-with col1:
-    plain_pied_obligatoire = st.checkbox(
-        "Plain-pied obligatoire"
-    )
+                secteur = st.text_input(
+                    "Secteur recherché",
+                    value="Alençon"
+                )
 
-with col2:
-    garage_obligatoire = st.checkbox(
-        "Garage obligatoire"
-    )
+                rayon_km = st.number_input(
+                    "Rayon de recherche (km)",
+                    min_value=0.0,
+                    value=0.0,
+                    step=1.0
+                )
 
-col1, col2 = st.columns(2)
+            st.divider()
 
-with col1:
-    chambres_min = st.number_input(
-        "Chambres minimum",
-        min_value=0,
-        value=0,
-        step=1
-    )
+            st.subheader("Type de bien")
 
-with col2:
-    chambres_rdc_min = st.number_input(
-        "Chambres au RDC minimum",
-        min_value=0,
-        value=0,
-        step=1
-    )
+            col1, col2, col3 = st.columns(3)
 
-col1, col2 = st.columns(2)
+            with col1:
 
-with col1:
-    salle_eau_rdc = st.checkbox(
-        "Salle d'eau au RDC obligatoire"
-    )
+                recherche_maison = st.checkbox(
+                    "Maison"
+                )
 
-with col2:
-    salles_eau_min = st.number_input(
-        "Salles d'eau minimum",
-        min_value=0,
-        value=0,
-        step=1
-    )
+            with col2:
 
-sous_sol_recherche = st.checkbox(
-    "Sous-sol recherché"
-)
+                recherche_pavillon = st.checkbox(
+                    "Pavillon"
+                )
 
-st.subheader("📍 Localisation")
+            with col3:
 
-secteur = st.text_input(
-    "Secteur",
-    value="Alençon"
-)
+                recherche_maison_pierre = st.checkbox(
+                    "Maison en pierre"
+                )
 
-rayon_km = st.number_input(
-    "Rayon de recherche (km)",
-    min_value=0.0,
-    value=20.0,
-    step=1.0
-)
+            st.divider()
 
-st.subheader("🌳 Terrain")
+            st.subheader("Critères obligatoires")
 
-surface_terrain = st.number_input(
-    "Surface de terrain souhaitée (m²)",
-    min_value=0.0,
-    value=0.0,
-    step=10.0
-)
+            col1, col2 = st.columns(2)
 
-st.subheader("💰 Budget")
+            with col1:
 
-budget_max = st.number_input(
-    "Budget maximum (€)",
-    min_value=0.0,
-    value=0.0,
-    step=1000.0
-)
+                plain_pied_obligatoire = st.checkbox(
+                    "Plain-pied obligatoire"
+                )
 
-st.caption(
-    "Une marge automatique de 2 000 € est appliquée au matching."
-)
+                garage_obligatoire = st.checkbox(
+                    "Garage obligatoire"
+                )
 
-st.subheader("📝 Notes")
+                salle_eau_rdc = st.checkbox(
+                    "Salle d'eau au RDC"
+                )
 
-notes = st.text_area(
-    "Précisions complémentaires"
-)
+            with col2:
 
-st.markdown("---")
+                sous_sol_recherche = st.checkbox(
+                    "Sous-sol recherché"
+                )
 
-if st.button(
-    "💾 Enregistrer l'acquéreur",
-    type="primary",
-    use_container_width=True
-):
+            st.divider()
 
-    if not prenom or not nom:
+            st.subheader("Critères de surface et pièces")
 
-        st.error(
-            "⚠️ Le prénom et le nom sont obligatoires."
-        )
+            col1, col2, col3 = st.columns(3)
 
-    elif budget_max <= 0:
+            with col1:
 
-        st.error(
-            "⚠️ Le budget maximum est obligatoire."
-        )
+                chambres_min = st.number_input(
+                    "Chambres minimum",
+                    min_value=0,
+                    value=0,
+                    step=1
+                )
 
-    else:
+            with col2:
 
-        try:
+                chambres_rdc_min = st.number_input(
+                    "Chambres au RDC minimum",
+                    min_value=0,
+                    value=0,
+                    step=1
+                )
 
-            data = {
-                "nom": nom,
-                "prenom": prenom,
-                "telephone": telephone,
-                "email": email,
-                "recherche_maison": recherche_maison,
-                "recherche_pavillon": recherche_pavillon,
-                "recherche_maison_pierre": recherche_maison_pierre,
-                "plain_pied_obligatoire": plain_pied_obligatoire,
-                "chambres_min": chambres_min if chambres_min > 0 else None,
-                "chambres_rdc_min": chambres_rdc_min if chambres_rdc_min > 0 else None,
-                "salle_eau_rdc": salle_eau_rdc,
-                "salles_eau_min": salles_eau_min if salles_eau_min > 0 else None,
-                "garage_obligatoire": garage_obligatoire,
-                "sous_sol_recherche": sous_sol_recherche,
-                "secteur": secteur,
-                "rayon_km": rayon_km,
-                "surface_terrain_souhaitee": surface_terrain if surface_terrain > 0 else None,
-                "budget_max": budget_max,
-                "marge_budget": 2000,
-                "notes": notes,
-                "actif": True
-            }
+            with col3:
 
-            supabase.table(
-                "acquereurs"
-            ).insert(
-                data
-            ).execute()
+                salles_eau_min = st.number_input(
+                    "Salles d'eau minimum",
+                    min_value=0,
+                    value=0,
+                    step=1
+                )
 
-            st.success(
-                "✅ Acquéreur enregistré avec succès."
+            surface_terrain_souhaitee = st.number_input(
+                "Surface de terrain souhaitée (m²)",
+                min_value=0.0,
+                value=0.0,
+                step=10.0
             )
 
-        except Exception as e:
+            st.divider()
 
-            st.error(
-                "❌ Erreur lors de l'enregistrement."
+            st.subheader("Budget")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+
+                budget_max = st.number_input(
+                    "Budget maximum (€)",
+                    min_value=0.0,
+                    value=0.0,
+                    step=5000.0
+                )
+
+            with col2:
+
+                marge_budget = st.number_input(
+                    "Marge acceptable (€)",
+                    min_value=0.0,
+                    value=2000.0,
+                    step=500.0
+                )
+
+            notes = st.text_area(
+                "Notes complémentaires"
             )
 
-            st.write(str(e))
-```
-
-# ============================================================
-
-# ANNONCES
-
-# ============================================================
-
-elif page == "📋 Annonces":
-
-```
-st.title("📋 Annonces")
-
-st.write(
-    "Ajoutez une annonce immobilière manuellement."
-)
-
-st.info(
-    "🔎 La recherche automatique des sites immobiliers "
-    "sera ajoutée ensuite."
-)
-
-st.subheader("🔗 Informations générales")
-
-url = st.text_input(
-    "URL de l'annonce *",
-    placeholder="https://..."
-)
-
-titre = st.text_input(
-    "Titre de l'annonce"
-)
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    prix = st.number_input(
-        "Prix (€)",
-        min_value=0.0,
-        value=0.0,
-        step=1000.0
-    )
-
-with col2:
-    commune = st.text_input(
-        "Commune"
-    )
-
-with col3:
-    source = st.text_input(
-        "Source",
-        placeholder="LeBonCoin, SeLoger..."
-    )
-
-st.subheader("🏠 Type de bien")
-
-type_maison = st.selectbox(
-    "Type",
-    [
-        "Maison",
-        "Pavillon",
-        "Maison en pierre"
-    ]
-)
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    maison_pierre = st.selectbox(
-        "Maison en pierre ?",
-        [
-            "Non précisé",
-            "Oui",
-            "Non"
-        ]
-    )
-
-with col2:
-    pavillon = st.selectbox(
-        "Pavillon ?",
-        [
-            "Non précisé",
-            "Oui",
-            "Non"
-        ]
-    )
-
-with col3:
-    plain_pied = st.selectbox(
-        "Plain-pied ?",
-        [
-            "Non précisé",
-            "Oui",
-            "Non"
-        ]
-    )
-
-st.subheader("🛏️ Chambres et salles d'eau")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    chambres = st.number_input(
-        "Chambres",
-        min_value=0,
-        value=0,
-        step=1
-    )
-
-with col2:
-    chambres_rdc = st.number_input(
-        "Chambres RDC",
-        min_value=0,
-        value=0,
-        step=1
-    )
-
-with col3:
-    salles_eau = st.number_input(
-        "Salles d'eau",
-        min_value=0,
-        value=0,
-        step=1
-    )
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    salle_eau_rdc = st.selectbox(
-        "Salle d'eau RDC ?",
-        [
-            "Non précisé",
-            "Oui",
-            "Non"
-        ]
-    )
-
-with col2:
-    garage = st.selectbox(
-        "Garage ?",
-        [
-            "Non précisé",
-            "Oui",
-            "Non"
-        ]
-    )
-
-with col3:
-    sous_sol = st.selectbox(
-        "Sous-sol ?",
-        [
-            "Non précisé",
-            "Oui",
-            "Non"
-        ]
-    )
-
-surface_terrain = st.number_input(
-    "Surface du terrain (m²)",
-    min_value=0.0,
-    value=0.0,
-    step=10.0
-)
-
-description = st.text_area(
-    "Description"
-)
-
-st.markdown("---")
-
-if st.button(
-    "🔎 Enregistrer et lancer le matching",
-    type="primary",
-    use_container_width=True
-):
-
-    if not url:
-
-        st.error(
-            "⚠️ L'URL de l'annonce est obligatoire."
-        )
-
-    else:
-
-        try:
-
-            def convertir_booleen(valeur):
-
-                if valeur == "Oui":
-                    return True
-
-                if valeur == "Non":
-                    return False
-
-                return None
-
-            annonce_data = {
-                "url": url,
-                "titre": titre,
-                "source": source,
-                "prix": prix if prix > 0 else None,
-                "commune": commune,
-                "type_maison": type_maison,
-                "plain_pied": convertir_booleen(plain_pied),
-                "maison_pierre": convertir_booleen(maison_pierre),
-                "pavillon": convertir_booleen(pavillon),
-                "chambres": chambres if chambres > 0 else None,
-                "chambres_rdc": chambres_rdc if chambres_rdc > 0 else None,
-                "salle_eau_rdc": convertir_booleen(salle_eau_rdc),
-                "salles_eau": salles_eau if salles_eau > 0 else None,
-                "garage": convertir_booleen(garage),
-                "sous_sol": convertir_booleen(sous_sol),
-                "surface_terrain": surface_terrain if surface_terrain > 0 else None,
-                "description": description
-            }
-
-            annonce_existante = (
-                supabase
-                .table("annonces")
-                .select("*")
-                .eq("url", url)
-                .execute()
+            actif = st.checkbox(
+                "Acquéreur actif",
+                value=True
             )
 
-            if annonce_existante.data:
+            submitted = st.form_submit_button(
+                "💾 Enregistrer l'acquéreur",
+                use_container_width=True
+            )
 
-                annonce = annonce_existante.data[0]
+        if submitted:
 
-                st.warning(
-                    "⚠️ Cette annonce existe déjà."
+            if not prenom.strip():
+                st.error(
+                    "Le prénom est obligatoire."
+                )
+
+            elif not nom.strip():
+                st.error(
+                    "Le nom est obligatoire."
                 )
 
             else:
 
-                response = (
-                    supabase
-                    .table("annonces")
-                    .insert(annonce_data)
-                    .execute()
-                )
+                from database import supabase
 
-                annonce = response.data[0]
+                data = {
+                    "nom": nom.strip(),
+                    "prenom": prenom.strip(),
+                    "telephone": telephone.strip(),
+                    "email": email.strip(),
+                    "recherche_maison": recherche_maison,
+                    "recherche_pavillon": recherche_pavillon,
+                    "recherche_maison_pierre": recherche_maison_pierre,
+                    "plain_pied_obligatoire": plain_pied_obligatoire,
+                    "chambres_min": chambres_min if chambres_min > 0 else None,
+                    "chambres_rdc_min": chambres_rdc_min if chambres_rdc_min > 0 else None,
+                    "salle_eau_rdc": salle_eau_rdc,
+                    "salles_eau_min": salles_eau_min if salles_eau_min > 0 else None,
+                    "garage_obligatoire": garage_obligatoire,
+                    "sous_sol_recherche": sous_sol_recherche,
+                    "secteur": secteur.strip() or "Alençon",
+                    "rayon_km": rayon_km if rayon_km > 0 else None,
+                    "surface_terrain_souhaitee": (
+                        surface_terrain_souhaitee
+                        if surface_terrain_souhaitee > 0
+                        else None
+                    ),
+                    "budget_max": (
+                        budget_max
+                        if budget_max > 0
+                        else None
+                    ),
+                    "marge_budget": marge_budget,
+                    "notes": notes.strip(),
+                    "actif": actif
+                }
 
-                st.success(
-                    "✅ Annonce enregistrée."
-                )
+                try:
 
-            acquereurs = get_acquereurs(
-                actif=True
-            )
-
-            if not acquereurs:
-
-                st.warning(
-                    "⚠️ Aucun acquéreur actif."
-                )
-
-            else:
-
-                resultats = matcher_tous_les_acquereurs(
-                    acquereurs,
-                    annonce
-                )
-
-                for resultat in resultats:
-
-                    match_data = {
-                        "acquereur_id": resultat["acquereur"]["id"],
-                        "annonce_id": annonce["id"],
-                        "statut_matching": resultat["statut_matching"],
-                        "score": resultat["score"],
-                        "details_matching": resultat["details_matching"],
-                        "statut": "nouveau",
-                        "alerte_envoyee": False
-                    }
-
-                    (
+                    response = (
                         supabase
-                        .table("matches")
-                        .upsert(
-                            match_data,
-                            on_conflict="acquereur_id,annonce_id"
-                        )
+                        .table("acquereurs")
+                        .insert(data)
                         .execute()
                     )
 
-                st.markdown("---")
-                st.subheader("🎯 Résultats")
+                    if response.data:
 
-                for resultat in resultats:
+                        st.success(
+                            f"✅ Acquéreur {prenom} {nom} enregistré."
+                        )
 
-                    acquereur = resultat["acquereur"]
-                    statut = resultat["statut_matching"]
-                    score = resultat["score"]
-
-                    if statut == "correspondance":
-
-                        emoji = "🟢"
-                        texte = "Correspondance"
-
-                    elif statut == "a_verifier":
-
-                        emoji = "🟠"
-                        texte = "À vérifier"
+                        st.rerun()
 
                     else:
 
-                        emoji = "🔴"
-                        texte = "Écarté"
+                        st.error(
+                            "L'acquéreur n'a pas pu être enregistré."
+                        )
 
-                    st.markdown(
-                        f"### {emoji} "
-                        f"{acquereur['prenom']} "
-                        f"{acquereur['nom']}"
+                except Exception as erreur:
+
+                    st.error(
+                        "Erreur lors de l'enregistrement."
                     )
 
-                    st.write(
-                        f"**Statut :** {texte}"
-                    )
+                    st.code(str(erreur))
 
-                    st.write(
-                        f"**Score :** {score}%"
-                    )
+    # --------------------------------------------------------
+    # LISTE
+    # --------------------------------------------------------
 
-                    for detail in resultat["details_matching"]:
+    with onglet_liste:
 
-                        if detail["statut"] == "correspondance":
+        st.subheader("Acquéreurs actifs")
 
-                            st.success(
-                                "✅ " + detail["message"]
+        try:
+
+            acquereurs = get_acquereurs(actif=True)
+
+            if not acquereurs:
+
+                st.info(
+                    "Aucun acquéreur actif."
+                )
+
+            else:
+
+                for acquereur in acquereurs:
+
+                    prenom = acquereur.get("prenom", "")
+                    nom = acquereur.get("nom", "")
+
+                    budget = acquereur.get("budget_max")
+
+                    if budget:
+                        budget_affiche = f"{budget:,.0f} €"
+                    else:
+                        budget_affiche = "Non renseigné"
+
+                    with st.expander(
+                        f"👤 {prenom} {nom}"
+                    ):
+
+                        col1, col2 = st.columns(2)
+
+                        with col1:
+
+                            st.write(
+                                f"**Secteur :** "
+                                f"{acquereur.get('secteur', '')}"
                             )
 
-                        elif detail["statut"] == "a_verifier":
-
-                            st.warning(
-                                "⚠️ " + detail["message"]
+                            st.write(
+                                f"**Rayon :** "
+                                f"{acquereur.get('rayon_km') or 'Non renseigné'} km"
                             )
 
-                        else:
-
-                            st.error(
-                                "❌ " + detail["message"]
+                            st.write(
+                                f"**Budget :** "
+                                f"{budget_affiche}"
                             )
 
-        except Exception as e:
+                        with col2:
+
+                            st.write(
+                                f"**Téléphone :** "
+                                f"{acquereur.get('telephone') or '-'}"
+                            )
+
+                            st.write(
+                                f"**Email :** "
+                                f"{acquereur.get('email') or '-'}"
+                            )
+
+                            st.write(
+                                f"**Notes :** "
+                                f"{acquereur.get('notes') or '-'}"
+                            )
+
+        except Exception as erreur:
 
             st.error(
-                "❌ Erreur lors du traitement de l'annonce."
+                "Impossible de charger les acquéreurs."
             )
 
-            st.write(str(e))
-```
+            st.code(str(erreur))
+
 
 # ============================================================
-
-# MATCHING
-
+# ANNONCES
 # ============================================================
 
-elif page == "🎯 Matching":
+elif page == "🏡 Annonces":
 
-```
-st.title("🎯 Matching")
+    st.title("🏡 Annonces")
 
-st.write(
-    "Toutes les correspondances entre vos annonces et vos acquéreurs."
-)
+    st.info(
+        "Pour le moment, les annonces sont ajoutées manuellement. "
+        "La recherche automatique sur les sites sera ajoutée ensuite."
+    )
 
-try:
+    st.subheader("➕ Ajouter une annonce")
 
-    matches = get_matches()
-    acquereurs = get_acquereurs(actif=False)
-    annonces = get_annonces()
+    with st.form("form_annonce"):
 
-    acquereurs_par_id = {
-        acquereur["id"]: acquereur
-        for acquereur in acquereurs
-    }
-
-    annonces_par_id = {
-        annonce["id"]: annonce
-        for annonce in annonces
-    }
-
-    if not matches:
-
-        st.info(
-            "Aucun matching enregistré pour le moment."
+        titre = st.text_input(
+            "Titre de l'annonce"
         )
 
-    else:
-
-        nb_correspondances = sum(
-            1
-            for match in matches
-            if match.get("statut_matching") == "correspondance"
-        )
-
-        nb_a_verifier = sum(
-            1
-            for match in matches
-            if match.get("statut_matching") == "a_verifier"
-        )
-
-        nb_ecartes = sum(
-            1
-            for match in matches
-            if match.get("statut_matching") == "ecarte"
+        url = st.text_input(
+            "URL de l'annonce *"
         )
 
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            st.metric(
-                "🟢 Correspondances",
-                nb_correspondances
+
+            source = st.text_input(
+                "Source",
+                placeholder="Ex : Leboncoin"
             )
 
         with col2:
-            st.metric(
-                "🟠 À vérifier",
-                nb_a_verifier
+
+            prix = st.number_input(
+                "Prix (€)",
+                min_value=0.0,
+                value=0.0,
+                step=1000.0
             )
 
         with col3:
-            st.metric(
-                "🔴 Écartés",
-                nb_ecartes
+
+            commune = st.text_input(
+                "Commune"
             )
 
-        st.markdown("---")
+        st.divider()
 
-        for match in matches:
+        st.subheader("Caractéristiques du bien")
 
-            statut = match.get(
-                "statut_matching"
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+
+            type_maison = st.selectbox(
+                "Type",
+                [
+                    "",
+                    "maison",
+                    "pavillon",
+                    "maison_pierre"
+                ]
             )
 
-            score = match.get(
-                "score",
-                0
+            chambres = st.number_input(
+                "Nombre de chambres",
+                min_value=0,
+                value=0,
+                step=1
             )
 
-            acquereur = acquereurs_par_id.get(
-                match.get("acquereur_id")
+            chambres_rdc = st.number_input(
+                "Chambres au RDC",
+                min_value=0,
+                value=0,
+                step=1
             )
 
-            annonce = annonces_par_id.get(
-                match.get("annonce_id")
+        with col2:
+
+            plain_pied = st.checkbox(
+                "Plain-pied"
             )
 
-            if statut == "correspondance":
-
-                emoji = "🟢"
-                texte_statut = "Correspondance"
-
-            elif statut == "a_verifier":
-
-                emoji = "🟠"
-                texte_statut = "À vérifier"
-
-            else:
-
-                emoji = "🔴"
-                texte_statut = "Écarté"
-
-            if acquereur:
-
-                nom_acquereur = (
-                    f"{acquereur.get('prenom', '')} "
-                    f"{acquereur.get('nom', '')}"
-                ).strip()
-
-            else:
-
-                nom_acquereur = "Acquéreur introuvable"
-
-            if annonce:
-
-                titre_annonce = (
-                    annonce.get("titre")
-                    or "Annonce sans titre"
-                )
-
-                commune = (
-                    annonce.get("commune")
-                    or "Commune non précisée"
-                )
-
-                prix = annonce.get(
-                    "prix"
-                )
-
-                url_annonce = annonce.get(
-                    "url"
-                )
-
-            else:
-
-                titre_annonce = "Annonce introuvable"
-                commune = "—"
-                prix = None
-                url_annonce = None
-
-            st.markdown("---")
-
-            st.markdown(
-                f"## {emoji} {nom_acquereur}"
+            salle_eau_rdc = st.checkbox(
+                "Salle d'eau au RDC"
             )
 
-            col1, col2 = st.columns(
-                [3, 1]
+            salles_eau = st.number_input(
+                "Nombre de salles d'eau",
+                min_value=0,
+                value=0,
+                step=1
             )
 
-            with col1:
+        with col3:
 
-                st.write(
-                    f"**Statut :** {texte_statut}"
+            garage = st.checkbox(
+                "Garage"
+            )
+
+            sous_sol = st.checkbox(
+                "Sous-sol"
+            )
+
+            maison_pierre = st.checkbox(
+                "Maison en pierre"
+            )
+
+        surface_terrain = st.number_input(
+            "Surface du terrain (m²)",
+            min_value=0.0,
+            value=0.0,
+            step=10.0
+        )
+
+        st.divider()
+
+        st.subheader("Localisation")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+
+            latitude = st.number_input(
+                "Latitude",
+                value=0.0,
+                format="%.6f"
+            )
+
+        with col2:
+
+            longitude = st.number_input(
+                "Longitude",
+                value=0.0,
+                format="%.6f"
+            )
+
+        description = st.text_area(
+            "Description"
+        )
+
+        submitted = st.form_submit_button(
+            "💾 Enregistrer l'annonce et lancer le matching",
+            use_container_width=True
+        )
+
+    if submitted:
+
+        if not url.strip():
+
+            st.error(
+                "L'URL de l'annonce est obligatoire."
+            )
+
+        else:
+
+            try:
+
+                annonce_existante = None
+
+                from database import get_annonce_by_url
+
+                annonce_existante = get_annonce_by_url(
+                    url.strip()
                 )
 
-                st.write(
-                    f"**Annonce :** {titre_annonce}"
-                )
+                if annonce_existante:
 
-                st.write(
-                    f"📍 **Commune :** {commune}"
-                )
-
-                if prix:
-
-                    st.write(
-                        f"💰 **Prix :** "
-                        f"{prix:,.0f} €".replace(",", " ")
+                    st.warning(
+                        "Cette annonce existe déjà dans la base."
                     )
 
-            with col2:
+                    annonce = annonce_existante
 
-                st.metric(
-                    "Score",
-                    f"{score}%"
-                )
+                else:
 
-            if url_annonce:
+                    annonce_data = {
+                        "titre": titre.strip(),
+                        "url": url.strip(),
+                        "source": source.strip(),
+                        "prix": prix if prix > 0 else None,
+                        "commune": commune.strip(),
+                        "latitude": latitude if latitude != 0 else None,
+                        "longitude": longitude if longitude != 0 else None,
+                        "type_maison": type_maison or None,
+                        "plain_pied": plain_pied,
+                        "maison_pierre": maison_pierre,
+                        "pavillon": type_maison == "pavillon",
+                        "chambres": chambres if chambres > 0 else None,
+                        "chambres_rdc": (
+                            chambres_rdc
+                            if chambres_rdc > 0
+                            else None
+                        ),
+                        "salle_eau_rdc": salle_eau_rdc,
+                        "salles_eau": (
+                            salles_eau
+                            if salles_eau > 0
+                            else None
+                        ),
+                        "garage": garage,
+                        "sous_sol": sous_sol,
+                        "surface_terrain": (
+                            surface_terrain
+                            if surface_terrain > 0
+                            else None
+                        ),
+                        "description": description.strip()
+                    }
 
-                st.link_button(
-                    "🔗 Ouvrir l'annonce",
-                    url_annonce
-                )
-
-            st.write(
-                "### 🔎 Détail des critères"
-            )
-
-            details = match.get(
-                "details_matching"
-            ) or []
-
-            if not details:
-
-                st.info(
-                    "Aucun détail disponible."
-                )
-
-            else:
-
-                for detail in details:
-
-                    detail_statut = detail.get(
-                        "statut"
+                    annonce = insert_annonce(
+                        annonce_data
                     )
 
-                    message = detail.get(
-                        "message",
-                        ""
+                if annonce:
+
+                    st.success(
+                        "✅ Annonce enregistrée."
                     )
 
-                    if detail_statut == "correspondance":
+                    st.subheader(
+                        "🎯 Matching avec les acquéreurs"
+                    )
 
-                        st.success(
-                            "🟢 " + message
-                        )
+                    acquereurs = get_acquereurs(
+                        actif=True
+                    )
 
-                    elif detail_statut == "a_verifier":
+                    if not acquereurs:
 
-                        st.warning(
-                            "🟠 " + message
+                        st.info(
+                            "Aucun acquéreur actif à comparer."
                         )
 
                     else:
 
-                        st.error(
-                            "🔴 " + message
+                        resultats = matcher_tous_les_acquereurs(
+                            acquereurs,
+                            annonce
                         )
 
-except Exception as e:
+                        nombre_matches = 0
 
-    st.error(
-        "❌ Erreur lors du chargement du matching."
+                        for resultat in resultats:
+
+                            acquereur = resultat["acquereur"]
+
+                            match_data = {
+                                "acquereur_id": acquereur["id"],
+                                "annonce_id": annonce["id"],
+                                "statut_matching": resultat[
+                                    "statut_matching"
+                                ],
+                                "score": resultat["score"],
+                                "details_matching": resultat[
+                                    "details_matching"
+                                ],
+                                "statut": "nouveau"
+                            }
+
+                            insert_match(
+                                match_data
+                            )
+
+                            nombre_matches += 1
+
+                            nom_complet = (
+                                f"{acquereur.get('prenom', '')} "
+                                f"{acquereur.get('nom', '')}"
+                            )
+
+                            statut = resultat[
+                                "statut_matching"
+                            ]
+
+                            score = resultat[
+                                "score"
+                            ]
+
+                            if statut == "correspondance":
+
+                                st.success(
+                                    f"🟢 {nom_complet} — "
+                                    f"Correspondance — "
+                                    f"{score}%"
+                                )
+
+                            elif statut == "a_verifier":
+
+                                st.warning(
+                                    f"🟠 {nom_complet} — "
+                                    f"À vérifier — "
+                                    f"{score}%"
+                                )
+
+                            else:
+
+                                st.error(
+                                    f"🔴 {nom_complet} — "
+                                    f"Écarté — "
+                                    f"{score}%"
+                                )
+
+                        st.info(
+                            f"{nombre_matches} acquéreur(s) "
+                            "ont été analysés."
+                        )
+
+                else:
+
+                    st.error(
+                        "Impossible d'enregistrer l'annonce."
+                    )
+
+            except Exception as erreur:
+
+                st.error(
+                    "Une erreur est survenue."
+                )
+
+                st.code(str(erreur))
+
+
+# ============================================================
+# MATCHING
+# ============================================================
+
+elif page == "🎯 Matching":
+
+    st.title("🎯 Matching")
+
+    st.write(
+        "Cette page permet de consulter les correspondances "
+        "entre les annonces et les acquéreurs."
     )
 
-    st.write(str(e))
-```
+    try:
+
+        matches = get_matches()
+        annonces = get_annonces()
+        acquereurs = get_acquereurs(actif=False)
+
+        annonces_dict = {
+            annonce["id"]: annonce
+            for annonce in annonces
+        }
+
+        acquereurs_dict = {
+            acquereur["id"]: acquereur
+            for acquereur in acquereurs
+        }
+
+        if not matches:
+
+            st.info(
+                "Aucun matching enregistré pour le moment."
+            )
+
+        else:
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            correspondances = [
+                m for m in matches
+                if m.get("statut_matching") == "correspondance"
+            ]
+
+            a_verifier = [
+                m for m in matches
+                if m.get("statut_matching") == "a_verifier"
+            ]
+
+            ecartes = [
+                m for m in matches
+                if m.get("statut_matching") == "ecarte"
+            ]
+
+            with col1:
+
+                st.metric(
+                    "Total",
+                    len(matches)
+                )
+
+            with col2:
+
+                st.metric(
+                    "🟢 Correspondances",
+                    len(correspondances)
+                )
+
+            with col3:
+
+                st.metric(
+                    "🟠 À vérifier",
+                    len(a_verifier)
+                )
+
+            with col4:
+
+                st.metric(
+                    "🔴 Écartés",
+                    len(ecartes)
+                )
+
+            st.divider()
+
+            filtre = st.selectbox(
+                "Afficher",
+                [
+                    "Tous",
+                    "🟢 Correspondances",
+                    "🟠 À vérifier",
+                    "🔴 Écartés"
+                ]
+            )
+
+            matches_affiches = []
+
+            for match in matches:
+
+                statut = match.get(
+                    "statut_matching"
+                )
+
+                if filtre == "Tous":
+
+                    matches_affiches.append(
+                        match
+                    )
+
+                elif (
+                    filtre == "🟢 Correspondances"
+                    and statut == "correspondance"
+                ):
+
+                    matches_affiches.append(
+                        match
+                    )
+
+                elif (
+                    filtre == "🟠 À vérifier"
+                    and statut == "a_verifier"
+                ):
+
+                    matches_affiches.append(
+                        match
+                    )
+
+                elif (
+                    filtre == "🔴 Écartés"
+                    and statut == "ecarte"
+                ):
+
+                    matches_affiches.append(
+                        match
+                    )
+
+            for match in matches_affiches:
+
+                acquereur = acquereurs_dict.get(
+                    match.get("acquereur_id"),
+                    {}
+                )
+
+                annonce = annonces_dict.get(
+                    match.get("annonce_id"),
+                    {}
+                )
+
+                nom_complet = (
+                    f"{acquereur.get('prenom', '')} "
+                    f"{acquereur.get('nom', '')}"
+                )
+
+                titre = (
+                    annonce.get("titre")
+                    or "Annonce sans titre"
+                )
+
+                url = annonce.get("url")
+
+                statut = match.get(
+                    "statut_matching"
+                )
+
+                score = match.get(
+                    "score",
+                    0
+                )
+
+                if statut == "correspondance":
+
+                    st.markdown(
+                        '<div class="success-card">',
+                        unsafe_allow_html=True
+                    )
+
+                elif statut == "a_verifier":
+
+                    st.markdown(
+                        '<div class="warning-card">',
+                        unsafe_allow_html=True
+                    )
+
+                else:
+
+                    st.markdown(
+                        '<div class="danger-card">',
+                        unsafe_allow_html=True
+                    )
+
+                st.markdown(
+                    f"### {afficher_statut(statut)}"
+                )
+
+                st.write(
+                    f"**Acquéreur :** {nom_complet}"
+                )
+
+                st.write(
+                    f"**Annonce :** {titre}"
+                )
+
+                st.write(
+                    f"**Score :** {score}%"
+                )
+
+                if url:
+
+                    st.link_button(
+                        "🔗 Ouvrir l'annonce",
+                        url
+                    )
+
+                details = match.get(
+                    "details_matching"
+                )
+
+                if details:
+
+                    with st.expander(
+                        "Voir le détail du matching"
+                    ):
+
+                        for detail in details:
+
+                            detail_statut = detail.get(
+                                "statut"
+                            )
+
+                            critere = detail.get(
+                                "critere",
+                                ""
+                            )
+
+                            message = detail.get(
+                                "message",
+                                ""
+                            )
+
+                            if detail_statut == "correspondance":
+
+                                st.write(
+                                    f"🟢 **{critere}** — "
+                                    f"{message}"
+                                )
+
+                            elif detail_statut == "a_verifier":
+
+                                st.write(
+                                    f"🟠 **{critere}** — "
+                                    f"{message}"
+                                )
+
+                            else:
+
+                                st.write(
+                                    f"🔴 **{critere}** — "
+                                    f"{message}"
+                                )
+
+                st.markdown(
+                    "</div>",
+                    unsafe_allow_html=True
+                )
+
+    except Exception as erreur:
+
+        st.error(
+            "Impossible de charger les résultats de matching."
+        )
+
+        st.code(str(erreur))
