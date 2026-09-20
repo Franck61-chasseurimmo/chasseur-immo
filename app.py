@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 
 from database import (
@@ -55,48 +56,48 @@ if page == "🏠 Tableau de bord":
 
     try:
 
-        acquereurs = supabase.table(
-            "acquereurs"
-        ).select(
-            "id",
-            count="exact"
-        ).execute()
+        acquereurs_response = (
+            supabase
+            .table("acquereurs")
+            .select("id", count="exact")
+            .execute()
+        )
 
-        annonces = supabase.table(
-            "annonces"
-        ).select(
-            "id",
-            count="exact"
-        ).execute()
+        annonces_response = (
+            supabase
+            .table("annonces")
+            .select("id", count="exact")
+            .execute()
+        )
 
-        matches = supabase.table(
-            "matches"
-        ).select(
-            "id",
-            count="exact"
-        ).execute()
+        matches_response = (
+            supabase
+            .table("matches")
+            .select("id", count="exact")
+            .execute()
+        )
 
-        nb_acquereurs = acquereurs.count or 0
-        nb_annonces = annonces.count or 0
-        nb_matches = matches.count or 0
+        nb_acquereurs = acquereurs_response.count or 0
+        nb_annonces = annonces_response.count or 0
+        nb_matches = matches_response.count or 0
 
         col1, col2, col3 = st.columns(3)
 
         with col1:
             st.metric(
-                "Acquéreurs",
+                "👤 Acquéreurs",
                 nb_acquereurs
             )
 
         with col2:
             st.metric(
-                "Annonces",
+                "🏠 Annonces",
                 nb_annonces
             )
 
         with col3:
             st.metric(
-                "Matches",
+                "🎯 Matches",
                 nb_matches
             )
 
@@ -837,7 +838,7 @@ elif page == "📋 Annonces":
                         ).execute()
 
                     # ----------------------------------------
-                    # AFFICHAGE
+                    # AFFICHAGE DES RESULTATS
                     # ----------------------------------------
 
                     for resultat in resultats:
@@ -875,50 +876,45 @@ elif page == "📋 Annonces":
                                 "Écarté"
                             )
 
-                        with st.expander(
-                            f"{emoji} "
+                        st.markdown(
+                            f"### {emoji} "
                             f"{acquereur['prenom']} "
-                            f"{acquereur['nom']} "
-                            f" — {titre_statut} "
-                            f" — Score {score}%"
-                        ):
+                            f"{acquereur['nom']} — "
+                            f"{titre_statut}"
+                        )
 
-                            for detail in resultat[
-                                "details_matching"
-                            ]:
+                        st.write(
+                            f"**Score de matching : {score}%**"
+                        )
 
-                                if detail[
-                                    "statut"
-                                ] == "correspondance":
+                        for detail in resultat[
+                            "details_matching"
+                        ]:
 
-                                    st.success(
-                                        "✅ "
-                                        + detail["message"]
-                                    )
+                            if detail[
+                                "statut"
+                            ] == "correspondance":
 
-                                elif detail[
-                                    "statut"
-                                ] == "a_verifier":
+                                st.success(
+                                    "✅ "
+                                    + detail["message"]
+                                )
 
-                                    st.warning(
-                                        "⚠️ "
-                                        + detail["message"]
-                                    )
+                            elif detail[
+                                "statut"
+                            ] == "a_verifier":
 
-                                else:
+                                st.warning(
+                                    "⚠️ "
+                                    + detail["message"]
+                                )
 
-                                    st.error(
-                                        "❌ "
-                                        + detail["message"]
-                                    )
+                            else:
 
-            except Exception as e:
-
-                st.error(
-                    "❌ Une erreur est survenue."
-                )
-
-                st.write(str(e))
+                                st.error(
+                                    "❌ "
+                                    + detail["message"]
+                                )
 
 
 # ============================================================
@@ -945,25 +941,289 @@ elif page == "🎯 Matching":
 
         else:
 
+            # ------------------------------------------------
+            # Récupération des données liées
+            # ------------------------------------------------
+
+            acquereurs = get_acquereurs(
+                actif=False
+            )
+
+            annonces = get_annonces()
+
+            acquereurs_par_id = {
+                acquereur["id"]: acquereur
+                for acquereur in acquereurs
+            }
+
+            annonces_par_id = {
+                annonce["id"]: annonce
+                for annonce in annonces
+            }
+
+            # ------------------------------------------------
+            # COMPTEURS
+            # ------------------------------------------------
+
+            nb_correspondances = sum(
+                1
+                for match in matches
+                if match.get("statut_matching")
+                == "correspondance"
+            )
+
+            nb_a_verifier = sum(
+                1
+                for match in matches
+                if match.get("statut_matching")
+                == "a_verifier"
+            )
+
+            nb_ecartes = sum(
+                1
+                for match in matches
+                if match.get("statut_matching")
+                == "ecarte"
+            )
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+
+                st.metric(
+                    "🟢 Correspondances",
+                    nb_correspondances
+                )
+
+            with col2:
+
+                st.metric(
+                    "🟠 À vérifier",
+                    nb_a_verifier
+                )
+
+            with col3:
+
+                st.metric(
+                    "🔴 Écartés",
+                    nb_ecartes
+                )
+
+            st.markdown("---")
+
+            # ------------------------------------------------
+            # AFFICHAGE DES MATCHES
+            # ------------------------------------------------
+
             for match in matches:
 
                 statut = match.get(
                     "statut_matching"
                 )
 
+                score = match.get(
+                    "score",
+                    0
+                )
+
+                acquereur = acquereurs_par_id.get(
+                    match.get("acquereur_id")
+                )
+
+                annonce = annonces_par_id.get(
+                    match.get("annonce_id")
+                )
+
+                # --------------------------------------------
+                # Statut visuel
+                # --------------------------------------------
+
                 if statut == "correspondance":
+
                     emoji = "🟢"
+                    titre_statut = "Correspondance"
 
                 elif statut == "a_verifier":
+
                     emoji = "🟠"
+                    titre_statut = "À vérifier"
 
                 else:
-                    emoji = "🔴"
 
-                st.write(
-                    f"{emoji} "
-                    f"Score : {match.get('score', 0)}%"
-                )
+                    emoji = "🔴"
+                    titre_statut = "Écarté"
+
+                # --------------------------------------------
+                # Informations acquéreur
+                # --------------------------------------------
+
+                if acquereur:
+
+                    nom_acquereur = (
+                        f"{acquereur.get('prenom', '')} "
+                        f"{acquereur.get('nom', '')}"
+                    ).strip()
+
+                else:
+
+                    nom_acquereur = (
+                        "Acquéreur introuvable"
+                    )
+
+                # --------------------------------------------
+                # Informations annonce
+                # --------------------------------------------
+
+                if annonce:
+
+                    titre_annonce = (
+                        annonce.get("titre")
+                        or "Annonce sans titre"
+                    )
+
+                    commune_annonce = (
+                        annonce.get("commune")
+                        or "Commune non précisée"
+                    )
+
+                    prix_annonce = annonce.get(
+                        "prix"
+                    )
+
+                    if prix_annonce:
+
+                        prix_affichage = (
+                            f"{prix_annonce:,.0f} €"
+                            .replace(",", " ")
+                        )
+
+                    else:
+
+                        prix_affichage = (
+                            "Prix non précisé"
+                        )
+
+                    url_annonce = annonce.get(
+                        "url"
+                    )
+
+                else:
+
+                    titre_annonce = (
+                        "Annonce introuvable"
+                    )
+
+                    commune_annonce = ""
+
+                    prix_affichage = ""
+
+                    url_annonce = None
+
+                # --------------------------------------------
+                # CARTE DU MATCH
+                # --------------------------------------------
+
+                with st.container(border=True):
+
+                    col1, col2 = st.columns(
+                        [3, 1]
+                    )
+
+                    with col1:
+
+                        st.markdown(
+                            f"### {emoji} {nom_acquereur}"
+                        )
+
+                        st.write(
+                            f"**Statut :** "
+                            f"{titre_statut}"
+                        )
+
+                        st.write(
+                            f"**Annonce :** "
+                            f"{titre_annonce}"
+                        )
+
+                        if commune_annonce:
+
+                            st.write(
+                                f"📍 **Commune :** "
+                                f"{commune_annonce}"
+                            )
+
+                        if prix_affichage:
+
+                            st.write(
+                                f"💰 **Prix :** "
+                                f"{prix_affichage}"
+                            )
+
+                    with col2:
+
+                        st.metric(
+                            "Score",
+                            f"{score}%"
+                        )
+
+                    if url_annonce:
+
+                        st.link_button(
+                            "🔗 Voir l'annonce",
+                            url_annonce,
+                            use_container_width=True
+                        )
+
+                    st.markdown(
+                        "**🔎 Détail du matching**"
+                    )
+
+                    details = match.get(
+                        "details_matching"
+                    ) or []
+
+                    if not details:
+
+                        st.info(
+                            "Aucun détail de matching disponible."
+                        )
+
+                    else:
+
+                        for detail in details:
+
+                            detail_statut = detail.get(
+                                "statut"
+                            )
+
+                            message = detail.get(
+                                "message",
+                                ""
+                            )
+
+                            critere = detail.get(
+                                "critere",
+                                ""
+                            )
+
+                            if detail_statut == "correspondance":
+
+                                st.success(
+                                    f"✅ {message}"
+                                )
+
+                            elif detail_statut == "a_verifier":
+
+                                st.warning(
+                                    f"⚠️ {message}"
+                                )
+
+                            else:
+
+                                st.error(
+                                    f"❌ {message}"
+                                )
+
 
     except Exception as e:
 
@@ -972,3 +1232,4 @@ elif page == "🎯 Matching":
         )
 
         st.write(str(e))
+```
