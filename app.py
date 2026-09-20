@@ -1337,4 +1337,3 @@ elif page == "🎯 Matching":
         st.code(
             str(erreur)
         )
-```
