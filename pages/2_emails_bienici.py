@@ -10,9 +10,8 @@ st.write("Test de connexion et lecture des emails Bien'ici.")
 bouton = st.button("📥 Lire les derniers emails Bien'ici", use_container_width=True)
 
 if bouton:
-emails = get_bienici_emails(limit=20)
+    emails = get_bienici_emails(limit=20)
 
-```
 nombre = len(emails)
 
 st.success("Nombre d'emails trouvés : " + str(nombre))
@@ -30,4 +29,4 @@ if nombre > 0:
 
 else:
     st.warning("Aucun email Bien'ici trouvé.")
-```
+
