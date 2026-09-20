@@ -1,120 +1,39 @@
 import streamlit as st
 from email_import import get_bienici_emails
 
-st.set_page_config(
-page_title="Emails Bien'ici",
-page_icon="📥",
-layout="wide"
-)
+st.set_page_config(page_title="Emails Bien'ici", page_icon="📥", layout="wide")
 
 st.title("📥 Emails Bien'ici")
 
-st.write(
-"Cette page permet de vérifier les emails Bien'ici reçus "
-"sur la boîte Yahoo connectée à Chasseur Immo."
-)
+st.write("Test de lecture des emails Bien'ici reçus sur Yahoo.")
 
-if st.button(
-"📥 Lire les derniers emails Bien'ici",
-use_container_width=True
-):
+if not st.button("📥 Lire les derniers emails Bien'ici", use_container_width=True):
+st.stop()
 
-try:
+emails = get_bienici_emails(limit=20)
 
-    emails = get_bienici_emails(
-        limit=20
-    )
+if len(emails) == 0:
+st.warning("⚠️ Aucun email Bien'ici trouvé.")
+st.stop()
 
-    if not emails:
+st.success(f"✅ {len(emails)} email(s) Bien'ici trouvé(s).")
 
-        st.info(
-            "Aucun email Bien'ici trouvé."
-        )
+email_data = emails[0]
 
-    else:
+st.subheader("📧 Premier email trouvé")
 
-        st.success(
-            f"✅ {len(emails)} email(s) Bien'ici trouvé(s)."
-        )
+st.write("Objet : " + email_data.get("subject", "Sans objet"))
+st.write("Expéditeur : " + email_data.get("sender", ""))
+st.write("Date : " + email_data.get("date", ""))
 
-        for email_data in emails:
+text_body = email_data.get("text_body", "")
+html_body = email_data.get("html_body", "")
 
-            subject = email_data.get(
-                "subject",
-                "Sans objet"
-            )
-
-            sender = email_data.get(
-                "sender",
-                ""
-            )
-
-            date = email_data.get(
-                "date",
-                ""
-            )
-
-            text_body = email_data.get(
-                "text_body",
-                ""
-            )
-
-            html_body = email_data.get(
-                "html_body",
-                ""
-            )
-
-            with st.expander(
-                f"📧 {subject}"
-            ):
-
-                st.write(
-                    f"**Expéditeur :** {sender}"
-                )
-
-                st.write(
-                    f"**Date :** {date}"
-                )
-
-                st.divider()
-
-                if text_body:
-
-                    st.subheader(
-                        "Contenu texte"
-                    )
-
-                    st.text(
-                        text_body
-                    )
-
-                elif html_body:
-
-                    st.subheader(
-                        "Contenu HTML"
-                    )
-
-                    st.html(
-                        html_body
-                    )
-
-                else:
-
-                    st.info(
-                        "Le contenu de cet email "
-                        "n'a pas pu être lu."
-                    )
-
-except Exception as erreur:
-
-    st.error(
-        "❌ Impossible de lire les emails Bien'ici."
-    )
-
-    st.write(
-        "Détail de l'erreur :"
-    )
-
-    st.code(
-        str(erreur)
-    )
+if text_body:
+st.subheader("Contenu")
+st.text(text_body)
+elif html_body:
+st.subheader("Contenu HTML")
+st.html(html_body)
+else:
+st.info("Le contenu de cet email n'a pas pu être lu.")
