@@ -1,5 +1,4 @@
 import streamlit as st
-
 from email_import import get_bienici_emails
 
 st.set_page_config(
@@ -21,19 +20,12 @@ use_container_width=True
 ):
 
 try:
-
-    emails = get_bienici_emails(
-        limit=20
-    )
+    emails = get_bienici_emails(limit=20)
 
     if not emails:
-
-        st.info(
-            "Aucun email Bien'ici trouvé."
-        )
+        st.info("Aucun email Bien'ici trouvé.")
 
     else:
-
         st.success(
             f"✅ {len(emails)} email(s) Bien'ici trouvé(s)."
         )
@@ -55,9 +47,7 @@ try:
                 ""
             )
 
-            with st.expander(
-                f"📧 {subject}"
-            ):
+            with st.expander(f"📧 {subject}"):
 
                 st.write(
                     f"**Expéditeur :** {sender}"
@@ -81,23 +71,13 @@ try:
 
                 if text_body:
 
-                    st.subheader(
-                        "Contenu texte"
-                    )
-
-                    st.text(
-                        text_body
-                    )
+                    st.subheader("Contenu texte")
+                    st.text(text_body)
 
                 elif html_body:
 
-                    st.subheader(
-                        "Contenu HTML"
-                    )
-
-                    st.html(
-                        html_body
-                    )
+                    st.subheader("Contenu HTML")
+                    st.html(html_body)
 
                 else:
 
@@ -115,6 +95,4 @@ except Exception as erreur:
         "Détail de l'erreur :"
     )
 
-    st.code(
-        str(erreur)
-    )
+    st.code(str(erreur))
