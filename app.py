@@ -1,4 +1,4 @@
-```python
+
 import streamlit as st
 
 from database import (
