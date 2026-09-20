@@ -5,35 +5,29 @@ st.set_page_config(page_title="Emails Bien'ici", page_icon="📥", layout="wide"
 
 st.title("📥 Emails Bien'ici")
 
-st.write("Test de lecture des emails Bien'ici reçus sur Yahoo.")
+st.write("Test de connexion et lecture des emails Bien'ici.")
 
-if not st.button("📥 Lire les derniers emails Bien'ici", use_container_width=True):
-st.stop()
+bouton = st.button("📥 Lire les derniers emails Bien'ici", use_container_width=True)
 
+if bouton:
 emails = get_bienici_emails(limit=20)
 
-if len(emails) == 0:
-st.warning("⚠️ Aucun email Bien'ici trouvé.")
-st.stop()
+```
+nombre = len(emails)
 
-st.success(f"✅ {len(emails)} email(s) Bien'ici trouvé(s).")
+st.success("Nombre d'emails trouvés : " + str(nombre))
 
-email_data = emails[0]
+if nombre > 0:
+    premier = emails[0]
 
-st.subheader("📧 Premier email trouvé")
+    st.write("Objet : " + premier.get("subject", "Sans objet"))
+    st.write("Expéditeur : " + premier.get("sender", ""))
+    st.write("Date : " + premier.get("date", ""))
 
-st.write("Objet : " + email_data.get("subject", "Sans objet"))
-st.write("Expéditeur : " + email_data.get("sender", ""))
-st.write("Date : " + email_data.get("date", ""))
+    st.write("Contenu :")
 
-text_body = email_data.get("text_body", "")
-html_body = email_data.get("html_body", "")
+    st.text(premier.get("text_body", ""))
 
-if text_body:
-st.subheader("Contenu")
-st.text(text_body)
-elif html_body:
-st.subheader("Contenu HTML")
-st.html(html_body)
 else:
-st.info("Le contenu de cet email n'a pas pu être lu.")
+    st.warning("Aucun email Bien'ici trouvé.")
+```
