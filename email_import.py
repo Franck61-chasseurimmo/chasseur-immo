@@ -10,12 +10,6 @@ import streamlit as st
 IMAP_SERVER = "imap.mail.yahoo.com"
 IMAP_PORT = 993
 
-# ============================================================
-
-# CONNEXION YAHOO
-
-# ============================================================
-
 def get_yahoo_connection():
 """
 Ouvre une connexion sécurisée à Yahoo Mail.
@@ -37,12 +31,6 @@ mail.login(
 
 return mail
 ```
-
-# ============================================================
-
-# DECODE OBJET EMAIL
-
-# ============================================================
 
 def decode_email_subject(subject):
 """
@@ -72,12 +60,6 @@ for part, encoding in decoded_parts:
 
 return result
 ```
-
-# ============================================================
-
-# RECUPERATION DU CONTENU EMAIL
-
-# ============================================================
 
 def get_email_body(message):
 """
@@ -170,28 +152,13 @@ else:
 return text_body, html_body
 ```
 
-# ============================================================
-
-# EXTRACTION URL BIEN'ICI
-
-# ============================================================
-
 def extraire_url_bienici(url):
-
-```
 """
 Transforme un lien de redirection Bien'ici
 en URL réelle de l'annonce.
-
-Exemple :
-
-https://link.bienici.com/.../aHR0cHM6Ly93d3cuYmllbmljaS5jb20v...
-
-devient :
-
-https://www.bienici.com/annonce/...
 """
 
+```
 if not url:
     return None
 
@@ -199,11 +166,6 @@ url = url.replace(
     "&amp;",
     "&"
 )
-
-# --------------------------------------------------------
-# Cas normal :
-# la partie Base64 commence après le dernier "/"
-# --------------------------------------------------------
 
 parties = url.rstrip("/").split("/")
 
@@ -214,8 +176,6 @@ derniere_partie = parties[-1]
 
 try:
 
-    # Les liens Bien'ici peuvent avoir
-    # une longueur Base64 non multiple de 4.
     padding = "=" * (
         -len(derniere_partie) % 4
     )
@@ -239,42 +199,24 @@ except Exception:
 
     pass
 
-# --------------------------------------------------------
-# Si l'extraction échoue,
-# on conserve le lien original.
-# --------------------------------------------------------
-
 return url
 ```
-
-# ============================================================
-
-# EXTRACTION DES LIENS D'UN EMAIL
-
-# ============================================================
 
 def extraire_liens_bienici(
 text_body="",
 html_body=""
 ):
-
-```
 """
 Recherche tous les liens Bien'ici présents
 dans un email.
-
-Retourne une liste sans doublons.
 """
 
+```
 contenu = (
     html_body
     + "\n"
     + text_body
 )
-
-# --------------------------------------------------------
-# Recherche des liens link.bienici.com
-# --------------------------------------------------------
 
 urls = re.findall(
     r'https?://link\.bienici\.com/[^\s"<>]+',
@@ -285,7 +227,6 @@ resultats = []
 
 for url in urls:
 
-    # Nettoyage des caractères HTML
     url = url.rstrip(
         ".,);'>\""
     )
@@ -309,24 +250,12 @@ for url in urls:
 return resultats
 ```
 
-# ============================================================
-
-# RECUPERATION DES EMAILS BIEN'ICI
-
-# ============================================================
-
 def get_bienici_emails(limit=20):
-
-```
 """
 Recherche les derniers emails Bien'ici.
-
-La boîte est ouverte en lecture seule.
-
-Aucun email n'est supprimé,
-déplacé ou marqué comme lu.
 """
 
+```
 mail = get_yahoo_connection()
 
 try:
@@ -342,13 +271,11 @@ try:
     )
 
     if status != "OK":
-
         return []
 
     email_ids = data[0].split()
 
     if not email_ids:
-
         return []
 
     email_ids = email_ids[-limit:]
@@ -365,7 +292,6 @@ try:
         )
 
         if status != "OK":
-
             continue
 
         raw_email = None
@@ -377,14 +303,11 @@ try:
                 tuple
             ):
 
-                raw_email = (
-                    response_part[1]
-                )
+                raw_email = response_part[1]
 
                 break
 
         if not raw_email:
-
             continue
 
         message = email.message_from_bytes(
@@ -413,10 +336,6 @@ try:
                 message
             )
         )
-
-        # ------------------------------------------------
-        # EXTRACTION DES ANNONCES
-        # ------------------------------------------------
 
         liens_annonces = (
             extraire_liens_bienici(
@@ -466,24 +385,15 @@ finally:
         pass
 ```
 
-# ============================================================
-
-# RECUPERATION DES ANNONCES DEPUIS LES EMAILS
-
-# ============================================================
-
 def get_annonces_from_bienici_emails(
 limit=20
 ):
-
-```
 """
 Récupère toutes les URLs d'annonces
 trouvées dans les emails Bien'ici.
-
-Les doublons sont supprimés.
 """
 
+```
 emails = get_bienici_emails(
     limit=limit
 )
