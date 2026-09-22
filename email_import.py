@@ -8,279 +8,258 @@ import base64
 IMAP_SERVER = "imap.mail.yahoo.com"
 IMAP_PORT = 993
 
+
 def get_yahoo_connection():
-yahoo_email = st.secrets["YAHOO_EMAIL"]
-yahoo_app_password = st.secrets["YAHOO_APP_PASSWORD"]
+    yahoo_email = st.secrets["YAHOO_EMAIL"]
+    yahoo_app_password = st.secrets["YAHOO_APP_PASSWORD"]
 
-```
-mail = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
-mail.login(yahoo_email, yahoo_app_password)
+    mail = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
+    mail.login(yahoo_email, yahoo_app_password)
 
-return mail
-```
+    return mail
+
 
 def decode_email_subject(subject):
-if not subject:
-return ""
+    if not subject:
+        return ""
 
-```
-decoded_parts = decode_header(subject)
-result = ""
+    decoded_parts = decode_header(subject)
+    result = ""
 
-for part, encoding in decoded_parts:
-    if isinstance(part, bytes):
-        result += part.decode(
-            encoding or "utf-8",
-            errors="replace"
-        )
-    else:
-        result += part
+    for part, encoding in decoded_parts:
+        if isinstance(part, bytes):
+            result += part.decode(
+                encoding or "utf-8",
+                errors="replace"
+            )
+        else:
+            result += part
 
-return result
-```
+    return result
+
 
 def get_email_body(message):
-text_body = ""
-html_body = ""
+    text_body = ""
+    html_body = ""
 
-```
-if message.is_multipart():
+    if message.is_multipart():
+        for part in message.walk():
+            content_type = part.get_content_type()
+            content_disposition = str(
+                part.get("Content-Disposition", "")
+            )
 
-    for part in message.walk():
-
-        content_type = part.get_content_type()
-        content_disposition = str(
-            part.get("Content-Disposition", "")
-        )
-
-        if "attachment" in content_disposition.lower():
-            continue
-
-        try:
-            payload = part.get_payload(decode=True)
-
-            if payload is None:
+            if "attachment" in content_disposition.lower():
                 continue
 
-            charset = part.get_content_charset() or "utf-8"
+            try:
+                payload = part.get_payload(decode=True)
 
-            decoded_payload = payload.decode(
-                charset,
-                errors="replace"
-            )
+                if payload is None:
+                    continue
+
+                charset = part.get_content_charset() or "utf-8"
+
+                decoded_payload = payload.decode(
+                    charset,
+                    errors="replace"
+                )
+
+            except Exception:
+                continue
+
+            if content_type == "text/plain":
+                text_body += decoded_payload
+
+            elif content_type == "text/html":
+                html_body += decoded_payload
+
+    else:
+        try:
+            payload = message.get_payload(decode=True)
+
+            if payload:
+                charset = message.get_content_charset() or "utf-8"
+
+                decoded_payload = payload.decode(
+                    charset,
+                    errors="replace"
+                )
+
+                if message.get_content_type() == "text/html":
+                    html_body = decoded_payload
+                else:
+                    text_body = decoded_payload
 
         except Exception:
-            continue
+            pass
 
-        if content_type == "text/plain":
-            text_body += decoded_payload
+    return text_body, html_body
 
-        elif content_type == "text/html":
-            html_body += decoded_payload
-
-else:
-
-    try:
-        payload = message.get_payload(decode=True)
-
-        if payload:
-
-            charset = message.get_content_charset() or "utf-8"
-
-            decoded_payload = payload.decode(
-                charset,
-                errors="replace"
-            )
-
-            if message.get_content_type() == "text/html":
-                html_body = decoded_payload
-            else:
-                text_body = decoded_payload
-
-    except Exception:
-        pass
-
-return text_body, html_body
-```
 
 def get_bienici_emails(limit=20):
-mail = get_yahoo_connection()
+    mail = get_yahoo_connection()
 
-```
-try:
+    try:
+        mail.select("INBOX", readonly=True)
 
-    mail.select("INBOX", readonly=True)
-
-    status, data = mail.search(
-        None,
-        '(FROM "bienici.com")'
-    )
-
-    if status != "OK":
-        return []
-
-    email_ids = data[0].split()
-
-    if not email_ids:
-        return []
-
-    email_ids = email_ids[-limit:]
-
-    results = []
-
-    for email_id in reversed(email_ids):
-
-        status, message_data = mail.fetch(
-            email_id,
-            "(BODY.PEEK[])"
+        status, data = mail.search(
+            None,
+            '(FROM "bienici.com")'
         )
 
         if status != "OK":
-            continue
+            return []
 
-        raw_email = None
+        email_ids = data[0].split()
 
-        for response_part in message_data:
+        if not email_ids:
+            return []
 
-            if isinstance(response_part, tuple):
-                raw_email = response_part[1]
-                break
+        email_ids = email_ids[-limit:]
 
-        if not raw_email:
-            continue
+        results = []
 
-        message = email.message_from_bytes(raw_email)
+        for email_id in reversed(email_ids):
+            status, message_data = mail.fetch(
+                email_id,
+                "(BODY.PEEK[])"
+            )
 
-        subject = decode_email_subject(
-            message.get("Subject", "")
-        )
+            if status != "OK":
+                continue
 
-        sender = message.get("From", "")
-        date = message.get("Date", "")
+            raw_email = None
 
-        text_body, html_body = get_email_body(message)
+            for response_part in message_data:
+                if isinstance(response_part, tuple):
+                    raw_email = response_part[1]
+                    break
 
-        results.append(
-            {
-                "email_id": email_id.decode(),
-                "subject": subject,
-                "sender": sender,
-                "date": date,
-                "text_body": text_body,
-                "html_body": html_body
-            }
-        )
+            if not raw_email:
+                continue
 
-    return results
+            message = email.message_from_bytes(raw_email)
 
-finally:
+            subject = decode_email_subject(
+                message.get("Subject", "")
+            )
 
-    try:
-        mail.logout()
-    except Exception:
-        pass
-```
+            sender = message.get("From", "")
+            date = message.get("Date", "")
+
+            text_body, html_body = get_email_body(message)
+
+            results.append(
+                {
+                    "email_id": email_id.decode(),
+                    "subject": subject,
+                    "sender": sender,
+                    "date": date,
+                    "text_body": text_body,
+                    "html_body": html_body
+                }
+            )
+
+        return results
+
+    finally:
+        try:
+            mail.logout()
+        except Exception:
+            pass
+
 
 def extraire_url_bienici(url):
-if not url:
-return None
+    if not url:
+        return None
 
-```
-if "link.bienici.com" not in url:
+    if "link.bienici.com" not in url:
+        return url
+
+    try:
+        partie = url.rstrip("/").split("/")[-1]
+
+        partie += "=" * (-len(partie) % 4)
+
+        decoded = base64.urlsafe_b64decode(
+            partie
+        ).decode(
+            "utf-8",
+            errors="ignore"
+        )
+
+        if decoded.startswith("http"):
+            return decoded
+
+    except Exception:
+        pass
+
     return url
 
-try:
-
-    partie = url.rstrip("/").split("/")[-1]
-
-    partie += "=" * (-len(partie) % 4)
-
-    decoded = base64.urlsafe_b64decode(
-        partie
-    ).decode(
-        "utf-8",
-        errors="ignore"
-    )
-
-    if decoded.startswith("http"):
-        return decoded
-
-except Exception:
-    pass
-
-return url
-```
 
 def extraire_liens_bienici(texte):
-if not texte:
-return []
+    if not texte:
+        return []
 
-```
-urls = re.findall(
-    r'https?://[^\s"\'<>]+',
-    texte
-)
-
-resultats = []
-
-for url in urls:
-
-    url = url.rstrip(".,);]")
-
-    if (
-        "link.bienici.com" in url
-        or "bienici.com/annonce/" in url
-    ):
-
-        url_finale = extraire_url_bienici(url)
-
-        if (
-            url_finale
-            and url_finale not in resultats
-        ):
-
-            resultats.append(url_finale)
-
-return resultats
-```
-
-def get_annonces_from_bienici_emails(limit=20):
-emails = get_bienici_emails(
-limit=limit
-)
-
-```
-annonces = []
-
-for email_data in emails:
-
-    texte = (
-        email_data.get("html_body", "")
-        + "\n"
-        + email_data.get("text_body", "")
-    )
-
-    liens = extraire_liens_bienici(
+    urls = re.findall(
+        r'https?://[^\s"\'<>]+',
         texte
     )
 
-    for lien in liens:
+    resultats = []
 
-        annonces.append(
-            {
-                "url": lien,
-                "source": "Bien'ici",
-                "email_id": email_data.get(
-                    "email_id"
-                ),
-                "email_subject": email_data.get(
-                    "subject"
-                ),
-                "email_date": email_data.get(
-                    "date"
-                )
-            }
+    for url in urls:
+        url = url.rstrip(".,);]")
+
+        if (
+            "link.bienici.com" in url
+            or "bienici.com/annonce/" in url
+        ):
+            url_finale = extraire_url_bienici(url)
+
+            if (
+                url_finale
+                and url_finale not in resultats
+            ):
+                resultats.append(url_finale)
+
+    return resultats
+
+
+def get_annonces_from_bienici_emails(limit=20):
+    emails = get_bienici_emails(
+        limit=limit
+    )
+
+    annonces = []
+
+    for email_data in emails:
+        texte = (
+            email_data.get("html_body", "")
+            + "\n"
+            + email_data.get("text_body", "")
         )
 
-return annonces
-```
+        liens = extraire_liens_bienici(
+            texte
+        )
+
+        for lien in liens:
+            annonces.append(
+                {
+                    "url": lien,
+                    "source": "Bien'ici",
+                    "email_id": email_data.get(
+                        "email_id"
+                    ),
+                    "email_subject": email_data.get(
+                        "subject"
+                    ),
+                    "email_date": email_data.get(
+                        "date"
+                    )
+                }
+            )
+
+    return annonces
