@@ -1,152 +1,75 @@
+"""Accès Supabase côté serveur. Aucune connexion lors de l'import Python."""
 import streamlit as st
-from supabase import create_client, Client
+from supabase import create_client
 
 
 @st.cache_resource
-def get_supabase() -> Client:
-    """
-    Crée et retourne la connexion à Supabase.
-    """
-
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-
+def get_supabase():
+    try:
+        url, key = st.secrets['SUPABASE_URL'], st.secrets['SUPABASE_KEY']
+    except (KeyError, FileNotFoundError) as exc:
+        raise RuntimeError('Configurez SUPABASE_URL et SUPABASE_KEY dans les secrets.') from exc
     return create_client(url, key)
 
 
-# Connexion globale utilisée par l'application
-supabase = get_supabase()
+def _lister(table, filtres=None, ordre='id'):
+    rows, debut = [], 0
+    while True:
+        query = get_supabase().table(table).select('*')
+        for key, value in (filtres or {}).items():
+            query = query.eq(key, value)
+        lot = query.order(ordre).range(debut, debut + 499).execute().data or []
+        rows.extend(lot)
+        if len(lot) < 500:
+            return rows
+        debut += 500
 
-
-# ============================================================
-# ACQUEREURS
-# ============================================================
 
 def get_acquereurs(actif=True):
-    """
-    Récupère les acquéreurs.
-    """
-
-    query = supabase.table("acquereurs").select("*")
-
-    if actif:
-        query = query.eq("actif", True)
-
-    response = query.order("created_at", desc=True).execute()
-
-    return response.data
+    return _lister('acquereurs', {'actif': True} if actif else None)
 
 
-# ============================================================
-# ANNONCES
-# ============================================================
+def get_annonces(actives=False):
+    return _lister('annonces', {'statut_annonce': 'disponible'} if actives else None)
 
-def get_annonces():
-    """
-    Récupère toutes les annonces.
-    """
-
-    response = (
-        supabase
-        .table("annonces")
-        .select("*")
-        .order("imported_at", desc=True)
-        .execute()
-    )
-
-    return response.data
-
-
-def get_annonce_by_url(url):
-    """
-    Recherche une annonce à partir de son URL.
-    """
-
-    response = (
-        supabase
-        .table("annonces")
-        .select("*")
-        .eq("url", url)
-        .execute()
-    )
-
-    if response.data:
-        return response.data[0]
-
-    return None
-
-
-def insert_annonce(data):
-    """
-    Enregistre une nouvelle annonce.
-    """
-
-    response = (
-        supabase
-        .table("annonces")
-        .insert(data)
-        .execute()
-    )
-
-    if response.data:
-        return response.data[0]
-
-    return None
-
-
-# ============================================================
-# MATCHES
-# ============================================================
 
 def get_matches():
-    """
-    Récupère tous les matches.
-    """
-
-    response = (
-        supabase
-        .table("matches")
-        .select("*")
-        .order("created_at", desc=True)
-        .execute()
-    )
-
-    return response.data
+    return _lister('matches')
 
 
 def get_matches_for_acquereur(acquereur_id):
-    """
-    Récupère les matches d'un acquéreur.
-    """
+    return _lister('matches', {'acquereur_id': acquereur_id})
 
-    response = (
-        supabase
-        .table("matches")
-        .select("*")
-        .eq("acquereur_id", acquereur_id)
-        .order("created_at", desc=True)
-        .execute()
-    )
 
-    return response.data
+def get_annonce_by_url(url):
+    rows = get_supabase().table('annonces').select('*').eq('url', url).limit(1).execute().data
+    return rows[0] if rows else None
+
+
+def enregistrer(table, data, identifiant=None):
+    query = get_supabase().table(table)
+    result = (query.update(data).eq('id', identifiant) if identifiant is not None else query.insert(data)).execute()
+    if not result.data:
+        raise RuntimeError('Enregistrement non confirmé par la base.')
+    return result.data[0]
+
+
+def insert_annonce(data):
+    # ignore_duplicates préserve les caractéristiques déjà corrigées manuellement.
+    result = get_supabase().table('annonces').upsert(data, on_conflict='url', ignore_duplicates=True).execute()
+    return result.data[0] if result.data else get_annonce_by_url(data['url'])
 
 
 def insert_match(data):
-    """
-    Enregistre un match.
-    """
+    # Le recalcul ne doit jamais écraser le suivi commercial.
+    payload = {k: v for k, v in data.items() if k not in ('statut', 'commentaire')}
+    result = get_supabase().table('matches').upsert(payload, on_conflict='acquereur_id,annonce_id').execute()
+    return result.data[0] if result.data else None
 
-    response = (
-        supabase
-        .table("matches")
-        .upsert(
-            data,
-            on_conflict="acquereur_id,annonce_id"
-        )
-        .execute()
-    )
 
-    if response.data:
-        return response.data[0]
+def email_traite(cle):
+    return bool(get_supabase().table('email_imports').select('cle').eq('cle', cle).limit(1).execute().data)
 
-    return None
+
+def marquer_email(cle, nombre):
+    get_supabase().table('email_imports').upsert({'cle': cle, 'nombre_annonces': nombre}, on_conflict='cle').execute()
