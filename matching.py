@@ -1,751 +1,205 @@
-# ============================================================
-# MOTEUR DE MATCHING - CHASSEUR IMMO
-# ============================================================
-
+"""Matching explicable : inconnu, préférence et incompatibilité sont distincts."""
 import math
+import unicodedata
 
 
-# ============================================================
-# OUTILS
-# ============================================================
-
-def valeur_annonce(annonce, champ):
-    """
-    Retourne la valeur d'un champ d'annonce.
-    Si l'information n'existe pas, retourne None.
-    """
-    return annonce.get(champ)
-
-
-def ajouter_resultat(resultats, statut, critere, message):
-    """
-    Ajoute un résultat de contrôle.
-    """
-    resultats.append({
-        "statut": statut,
-        "critere": critere,
-        "message": message
-    })
+def normaliser_texte(value):
+    return ''.join(c for c in unicodedata.normalize('NFKD', str(value or '').lower())
+                   if not unicodedata.combining(c)).strip()
 
 
 def calculer_distance_km(lat1, lon1, lat2, lon2):
-    """
-    Calcule la distance entre deux coordonnées GPS
-    avec la formule de Haversine.
-    """
-
-    if None in (lat1, lon1, lat2, lon2):
+    if any(x is None for x in (lat1, lon1, lat2, lon2)):
         return None
 
-    rayon_terre = 6371
+    lat1, lon1, lat2, lon2 = map(float, (lat1, lon1, lat2, lon2))
 
-    lat1 = math.radians(lat1)
-    lon1 = math.radians(lon1)
-    lat2 = math.radians(lat2)
-    lon2 = math.radians(lon2)
+    if not all(math.isfinite(x) for x in (lat1, lon1, lat2, lon2)):
+        raise ValueError('Coordonnées non finies.')
 
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
+    if not (-90 <= lat1 <= 90 and -90 <= lat2 <= 90 and -180 <= lon1 <= 180 and -180 <= lon2 <= 180):
+        raise ValueError('Coordonnées hors limites.')
 
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(lat1)
-        * math.cos(lat2)
-        * math.sin(dlon / 2) ** 2
-    )
+    a1, a2 = map(math.radians, (lat1, lat2))
+    dlat, dlon = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
 
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    a = math.sin(dlat / 2) ** 2 + math.cos(a1) * math.cos(a2) * math.sin(dlon / 2) ** 2
 
-    return rayon_terre * c
+    return 6371 * 2 * math.asin(math.sqrt(min(1, max(0, a))))
 
 
-# ============================================================
-# VERIFICATION DU TYPE DE BIEN
-# ============================================================
+def matcher_acquereur(acquereur, annonce, latitude_reference=None, longitude_reference=None):
+    details = []
 
-def verifier_type_bien(acquereur, annonce, resultats):
-
-    types_recherches = []
-
-    if acquereur.get("recherche_maison"):
-        types_recherches.append("maison")
-
-    if acquereur.get("recherche_pavillon"):
-        types_recherches.append("pavillon")
-
-    if acquereur.get("recherche_maison_pierre"):
-        types_recherches.append("maison_pierre")
-
-    # Aucun type précisé
-    if not types_recherches:
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "type",
-            "Aucun type de bien précis n'a été renseigné."
-        )
-        return
-
-    type_annonce = annonce.get("type_maison")
-
-    # Information absente
-    if not type_annonce:
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "type",
-            "Le type de maison n'est pas précisé dans l'annonce."
-        )
-        return
-
-    type_annonce = str(type_annonce).lower().strip()
-
-    # On vérifie si le type de l'annonce correspond
-    correspond = False
-
-    if "maison" in types_recherches:
-        if "maison" in type_annonce:
-            correspond = True
-
-    if "pavillon" in types_recherches:
-        if "pavillon" in type_annonce:
-            correspond = True
-
-    if "maison_pierre" in types_recherches:
-        if annonce.get("maison_pierre") is True:
-            correspond = True
-
-    if correspond:
-        ajouter_resultat(
-            resultats,
-            "correspondance",
-            "type",
-            "Le type de bien correspond à la recherche."
-        )
-    else:
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "type",
-            "Le type de bien ne correspond pas clairement aux critères."
+    def ajouter(critere, valeur, conforme, imperatif, message):
+        statut = (
+            'a_verifier' if valeur is None else
+            'correspondance' if conforme else
+            'ecarte' if imperatif else
+            'preference_non_satisfaite'
         )
 
-
-# ============================================================
-# BUDGET
-# ============================================================
-
-def verifier_budget(acquereur, annonce, resultats):
-
-    budget = acquereur.get("budget_max")
-    marge = acquereur.get("marge_budget") or 2000
-    prix = annonce.get("prix")
-
-    if not budget:
-        return
-
-    if prix is None:
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "budget",
-            "Le prix de l'annonce n'est pas renseigné."
-        )
-        return
-
-    budget_acceptable = budget + marge
-
-    if prix <= budget_acceptable:
-
-        ajouter_resultat(
-            resultats,
-            "correspondance",
-            "budget",
-            f"Prix : {prix:,.0f} € / limite : {budget_acceptable:,.0f} €."
+        details.append(
+            dict(
+                critere=critere,
+                statut=statut,
+                message=message,
+                imperatif=imperatif
+            )
         )
 
-    else:
-
-        ajouter_resultat(
-            resultats,
-            "ecarte",
-            "budget",
-            f"Prix : {prix:,.0f} € / limite : {budget_acceptable:,.0f} €."
-        )
-
-
-# ============================================================
-# CHAMBRES
-# ============================================================
-
-def verifier_chambres(acquereur, annonce, resultats):
-
-    minimum = acquereur.get("chambres_min")
-    chambres = annonce.get("chambres")
-
-    if not minimum:
-        return
-
-    if chambres is None:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "chambres",
-            "Le nombre de chambres n'est pas précisé."
-        )
-
-        return
-
-    if chambres >= minimum:
-
-        ajouter_resultat(
-            resultats,
-            "correspondance",
-            "chambres",
-            f"{chambres} chambres / minimum demandé : {minimum}."
-        )
-
-    else:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "chambres",
-            f"{chambres} chambres / minimum demandé : {minimum}."
-        )
-
-
-# ============================================================
-# CHAMBRES RDC
-# ============================================================
-
-def verifier_chambres_rdc(acquereur, annonce, resultats):
-
-    minimum = acquereur.get("chambres_rdc_min")
-    chambres_rdc = annonce.get("chambres_rdc")
-
-    if not minimum:
-        return
-
-    if chambres_rdc is None:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "chambres_rdc",
-            "Le nombre de chambres au RDC n'est pas précisé."
-        )
-
-        return
-
-    if chambres_rdc >= minimum:
-
-        ajouter_resultat(
-            resultats,
-            "correspondance",
-            "chambres_rdc",
-            f"{chambres_rdc} chambre(s) au RDC / minimum demandé : {minimum}."
-        )
-
-    else:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "chambres_rdc",
-            f"{chambres_rdc} chambre(s) au RDC / minimum demandé : {minimum}."
-        )
-
-
-# ============================================================
-# SALLE D'EAU RDC
-# ============================================================
-
-def verifier_salle_eau_rdc(acquereur, annonce, resultats):
-
-    if not acquereur.get("salle_eau_rdc"):
-        return
-
-    valeur = annonce.get("salle_eau_rdc")
-
-    if valeur is None:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "salle_eau_rdc",
-            "La présence d'une salle d'eau au RDC n'est pas précisée."
-        )
-
-    elif valeur is True:
-
-        ajouter_resultat(
-            resultats,
-            "correspondance",
-            "salle_eau_rdc",
-            "Salle d'eau au RDC confirmée."
-        )
-
-    else:
-
-        ajouter_resultat(
-            resultats,
-            "ecarte",
-            "salle_eau_rdc",
-            "L'annonce indique qu'il n'y a pas de salle d'eau au RDC."
-        )
-
-
-# ============================================================
-# NOMBRE DE SALLES D'EAU
-# ============================================================
-
-def verifier_salles_eau(acquereur, annonce, resultats):
-
-    minimum = acquereur.get("salles_eau_min")
-    nombre = annonce.get("salles_eau")
-
-    if not minimum:
-        return
-
-    if nombre is None:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "salles_eau",
-            "Le nombre de salles d'eau n'est pas précisé."
-        )
-
-        return
-
-    if nombre >= minimum:
-
-        ajouter_resultat(
-            resultats,
-            "correspondance",
-            "salles_eau",
-            f"{nombre} salle(s) d'eau / minimum demandé : {minimum}."
-        )
-
-    else:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "salles_eau",
-            f"{nombre} salle(s) d'eau / minimum demandé : {minimum}."
-        )
-
-
-# ============================================================
-# PLAIN-PIED
-# ============================================================
-
-def verifier_plain_pied(acquereur, annonce, resultats):
-
-    if not acquereur.get("plain_pied_obligatoire"):
-        return
-
-    valeur = annonce.get("plain_pied")
-
-    if valeur is None:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "plain_pied",
-            "Le plain-pied n'est pas précisé dans l'annonce."
-        )
-
-    elif valeur is True:
-
-        ajouter_resultat(
-            resultats,
-            "correspondance",
-            "plain_pied",
-            "Plain-pied confirmé."
-        )
-
-    else:
-
-        ajouter_resultat(
-            resultats,
-            "ecarte",
-            "plain_pied",
-            "L'annonce indique que le bien n'est pas de plain-pied."
-        )
-
-
-# ============================================================
-# GARAGE
-# ============================================================
-
-def verifier_garage(acquereur, annonce, resultats):
-
-    if not acquereur.get("garage_obligatoire"):
-        return
-
-    valeur = annonce.get("garage")
-
-    if valeur is None:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "garage",
-            "La présence d'un garage n'est pas précisée."
-        )
-
-    elif valeur is True:
-
-        ajouter_resultat(
-            resultats,
-            "correspondance",
-            "garage",
-            "Garage confirmé."
-        )
-
-    else:
-
-        ajouter_resultat(
-            resultats,
-            "ecarte",
-            "garage",
-            "L'annonce indique qu'il n'y a pas de garage."
-        )
-
-
-# ============================================================
-# SOUS-SOL
-# ============================================================
-
-def verifier_sous_sol(acquereur, annonce, resultats):
-
-    if not acquereur.get("sous_sol_recherche"):
-        return
-
-    valeur = annonce.get("sous_sol")
-
-    if valeur is None:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "sous_sol",
-            "La présence d'un sous-sol n'est pas précisée."
-        )
-
-    elif valeur is True:
-
-        ajouter_resultat(
-            resultats,
-            "correspondance",
-            "sous_sol",
-            "Sous-sol confirmé."
-        )
-
-    else:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "sous_sol",
-            "Le sous-sol n'est pas présent selon les informations disponibles."
-        )
-
-
-# ============================================================
-# MAISON EN PIERRE
-# ============================================================
-
-def verifier_maison_pierre(acquereur, annonce, resultats):
-
-    if not acquereur.get("recherche_maison_pierre"):
-        return
-
-    valeur = annonce.get("maison_pierre")
-
-    if valeur is None:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "maison_pierre",
-            "Le caractère pierre de la maison n'est pas précisé."
-        )
-
-    elif valeur is True:
-
-        ajouter_resultat(
-            resultats,
-            "correspondance",
-            "maison_pierre",
-            "Maison en pierre confirmée."
-        )
-
-    else:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "maison_pierre",
-            "La maison en pierre n'est pas confirmée."
-        )
-
-
-# ============================================================
-# TERRAIN
-# ============================================================
-
-def verifier_terrain(acquereur, annonce, resultats):
-
-    minimum = acquereur.get("surface_terrain_souhaitee")
-    surface = annonce.get("surface_terrain")
-
-    if not minimum:
-        return
-
-    if surface is None:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "terrain",
-            "La surface du terrain n'est pas précisée."
-        )
-
-        return
-
-    if surface >= minimum:
-
-        ajouter_resultat(
-            resultats,
-            "correspondance",
-            "terrain",
-            f"Terrain : {surface:,.0f} m² / souhait : {minimum:,.0f} m²."
-        )
-
-    else:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "terrain",
-            f"Terrain : {surface:,.0f} m² / souhait : {minimum:,.0f} m²."
-        )
-
-
-# ============================================================
-# LOCALISATION
-# ============================================================
-
-def verifier_distance(
-    acquereur,
-    annonce,
-    latitude_reference=None,
-    longitude_reference=None,
-    resultats=None
-):
-
-    if resultats is None:
-        resultats = []
-
-    rayon = acquereur.get("rayon_km")
-
-    if not rayon:
-        return
-
-    lat_annonce = annonce.get("latitude")
-    lon_annonce = annonce.get("longitude")
-
-    if latitude_reference is None or longitude_reference is None:
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "localisation",
-            "La position du secteur de référence n'est pas disponible."
-        )
-        return
-
-    distance = calculer_distance_km(
-        latitude_reference,
-        longitude_reference,
-        lat_annonce,
-        lon_annonce
-    )
-
-    if distance is None:
-
-        ajouter_resultat(
-            resultats,
-            "a_verifier",
-            "localisation",
-            "La localisation précise de l'annonce n'est pas disponible."
-        )
-
-    elif distance <= rayon:
-
-        ajouter_resultat(
-            resultats,
-            "correspondance",
-            "localisation",
-            f"Distance : {distance:.1f} km / rayon : {rayon:.1f} km."
-        )
-
-    else:
-
-        ajouter_resultat(
-            resultats,
-            "ecarte",
-            "localisation",
-            f"Distance : {distance:.1f} km / rayon : {rayon:.1f} km."
-        )
-
-
-# ============================================================
-# MATCHING PRINCIPAL
-# ============================================================
-
-def matcher_acquereur(
-    acquereur,
-    annonce,
-    latitude_reference=None,
-    longitude_reference=None
-):
-
-    resultats = []
-
-    verifier_type_bien(
-        acquereur,
-        annonce,
-        resultats
-    )
-
-    verifier_budget(
-        acquereur,
-        annonce,
-        resultats
-    )
-
-    verifier_chambres(
-        acquereur,
-        annonce,
-        resultats
-    )
-
-    verifier_chambres_rdc(
-        acquereur,
-        annonce,
-        resultats
-    )
-
-    verifier_salle_eau_rdc(
-        acquereur,
-        annonce,
-        resultats
-    )
-
-    verifier_salles_eau(
-        acquereur,
-        annonce,
-        resultats
-    )
-
-    verifier_plain_pied(
-        acquereur,
-        annonce,
-        resultats
-    )
-
-    verifier_garage(
-        acquereur,
-        annonce,
-        resultats
-    )
-
-    verifier_sous_sol(
-        acquereur,
-        annonce,
-        resultats
-    )
-
-    verifier_maison_pierre(
-        acquereur,
-        annonce,
-        resultats
-    )
-
-    verifier_terrain(
-        acquereur,
-        annonce,
-        resultats
-    )
-
-    verifier_distance(
-        acquereur,
-        annonce,
-        latitude_reference,
-        longitude_reference,
-        resultats
-    )
-
-    # ========================================================
-    # CALCUL DU STATUT GLOBAL
-    # ========================================================
-
-    statuts = [
-        resultat["statut"]
-        for resultat in resultats
+    types = [
+        k for k in ('maison', 'pavillon', 'maison_pierre', 'appartement')
+        if acquereur.get('recherche_' + k)
     ]
 
-    nombre_ecartes = statuts.count("ecarte")
-    nombre_a_verifier = statuts.count("a_verifier")
+    categorie = normaliser_texte(annonce.get('type_maison'))
 
-    # Un critère clairement incompatible suffit
-    # à classer le bien comme écarté.
-    if nombre_ecartes > 0:
+    if not types:
+        ajouter('type', None, False, True, 'Type recherché non renseigné.')
 
-        statut_global = "ecarte"
+    elif not categorie:
+        ajouter('type', None, False, True, 'Type du bien à vérifier.')
 
-    # Sinon, s'il reste des informations à contrôler
-    elif nombre_a_verifier > 0:
-
-        statut_global = "a_verifier"
-
-    # Tous les critères connus correspondent
     else:
+        # Le matériau est comparé séparément ; un pavillon appartient aux maisons.
+        maison = categorie in ('maison', 'pavillon', 'maison_pierre')
 
-        statut_global = "correspondance"
+        ok = (
+            ('maison' in types and maison)
+            or ('maison_pierre' in types and maison)
+            or categorie in types
+        )
 
-    # ========================================================
-    # SCORE
-    # ========================================================
+        ajouter('type', categorie, ok, True, f'Type déclaré : {categorie}.')
 
-    nombre_correspondances = statuts.count("correspondance")
-    nombre_total = len(statuts)
+    budget = acquereur.get('budget_max')
 
-    if nombre_total > 0:
+    if budget is None or budget <= 0:
+        ajouter('budget', None, False, True, 'Budget acquéreur non renseigné.')
 
-        score = round(
-            (nombre_correspondances / nombre_total) * 100
+    else:
+        marge = acquereur.get('marge_budget')
+        limite = budget + (0 if marge is None else marge)
+        prix = annonce.get('prix')
+
+        ajouter(
+            'budget',
+            prix,
+            prix is not None and prix <= limite,
+            True,
+            f'Prix : {prix if prix is not None else "inconnu"} € ; plafond avec marge : {limite:g} €.'
+        )
+
+    for achat, bien, critere, obligatoire in (
+        ('chambres_min', 'chambres', 'chambres', True),
+        ('chambres_rdc_min', 'chambres_rdc', 'chambres_rdc', True),
+        ('salles_eau_min', 'salles_eau', 'salles_eau', True),
+        ('surface_habitable_min', 'surface_habitable', 'surface_habitable', True),
+        ('surface_terrain_souhaitee', 'surface_terrain', 'terrain', False),
+    ):
+        minimum = acquereur.get(achat)
+
+        if minimum is not None and minimum > 0:
+            valeur = annonce.get(bien)
+
+            ajouter(
+                critere,
+                valeur,
+                valeur is not None and valeur >= minimum,
+                obligatoire,
+                f'Valeur : {valeur if valeur is not None else "inconnue"} ; minimum : {minimum:g}.'
+            )
+
+    for achat, bien, obligatoire in (
+        ('plain_pied_obligatoire', 'plain_pied', True),
+        ('garage_obligatoire', 'garage', True),
+        ('salle_eau_rdc', 'salle_eau_rdc', True),
+        ('sous_sol_recherche', 'sous_sol', False),
+        ('recherche_maison_pierre', 'maison_pierre', False),
+    ):
+        if acquereur.get(achat):
+            valeur = annonce.get(bien)
+
+            ajouter(
+                bien,
+                valeur,
+                valeur is True,
+                obligatoire,
+                'Information inconnue.' if valeur is None else
+                'Présence confirmée.' if valeur else
+                'Absence confirmée.'
+            )
+
+    rayon = acquereur.get('rayon_km')
+    secteur = acquereur.get('secteur')
+
+    if rayon is not None and rayon > 0:
+        lat = acquereur.get('latitude_reference', latitude_reference)
+        lon = acquereur.get('longitude_reference', longitude_reference)
+
+        distance = calculer_distance_km(
+            lat,
+            lon,
+            annonce.get('latitude'),
+            annonce.get('longitude')
+        )
+
+        ajouter(
+            'localisation',
+            distance,
+            distance is not None and distance <= rayon,
+            True,
+            'Coordonnées de référence ou du bien manquantes.' if distance is None else
+            f'Distance à vol d’oiseau : {distance:.1f} km ; rayon : {rayon:g} km.'
+        )
+
+    elif secteur:
+        # Sans rayon, le secteur représente une liste explicite de communes.
+        communes = {
+            normaliser_texte(x)
+            for x in secteur.replace(';', ',').split(',')
+            if x.strip()
+        }
+
+        commune = annonce.get('commune')
+
+        ajouter(
+            'localisation',
+            commune or None,
+            normaliser_texte(commune) in communes,
+            True,
+            f'Commune : {commune or "inconnue"} ; communes demandées : {secteur}.'
         )
 
     else:
+        ajouter(
+            'localisation',
+            None,
+            False,
+            True,
+            'Secteur acquéreur non renseigné.'
+        )
 
-        score = 0
+    statuts = [d['statut'] for d in details]
 
-    return {
-        "statut_matching": statut_global,
-        "score": score,
-        "details_matching": resultats
-    }
+    statut = (
+        'ecarte' if 'ecarte' in statuts else
+        'a_verifier' if 'a_verifier' in statuts else
+        'preference_non_satisfaite' if 'preference_non_satisfaite' in statuts else
+        'correspondance'
+    )
 
+    connus = sum(s != 'a_verifier' for s in statuts)
+    conformes = statuts.count('correspondance')
 
-# ============================================================
-# MATCHING DE TOUS LES ACQUEREURS
-# ============================================================
+    return dict(
+        statut_matching=statut,
+        score=round(100 * conformes / connus) if connus else None,
+        couverture=round(100 * connus / len(details)) if details else 0,
+        details_matching=details
+    )
+
 
 def matcher_tous_les_acquereurs(
     acquereurs,
@@ -753,23 +207,16 @@ def matcher_tous_les_acquereurs(
     latitude_reference=None,
     longitude_reference=None
 ):
-
-    resultats = []
-
-    for acquereur in acquereurs:
-
-        resultat = matcher_acquereur(
-            acquereur,
-            annonce,
-            latitude_reference,
-            longitude_reference
+    return [
+        dict(
+            acquereur=a,
+            **matcher_acquereur(
+                a,
+                annonce,
+                latitude_reference,
+                longitude_reference
+            )
         )
-
-        resultats.append({
-            "acquereur": acquereur,
-            "statut_matching": resultat["statut_matching"],
-            "score": resultat["score"],
-            "details_matching": resultat["details_matching"]
-        })
-
-    return resultats
+        for a in acquereurs
+        if a.get('actif', True)
+    ]
