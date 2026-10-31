@@ -1,6 +1,10 @@
-"""Gestion du recalcul des correspondances et de l'import des annonces."""
+"""Import des annonces, enrichissement des fiches et recalcul du matching."""
 from matching import matcher_acquereur
-from email_import import extraire_liens_bienici, liens_non_resolus
+from email_import import (
+    extraire_annonces_bienici,
+    extraire_url_bienici,
+    liens_non_resolus
+)
 
 
 def recalculer(db, acquereurs=None, annonces=None):
@@ -46,15 +50,31 @@ def importer_emails(db, emails):
         messages=0,
         nouveaux=0,
         existants=0,
+        enrichis=0,
         deja_traites=0,
         non_resolus=0,
         sans_annonce=0
     )
 
     acheteurs = db.get_acquereurs()
+    index = {}
+
+    # Retrouver les annonces déjà importées,
+    # même si leurs anciennes URL contiennent des paramètres de suivi.
+    for bien in db.get_annonces():
+        canonique = extraire_url_bienici(bien.get('url'))
+
+        if canonique and (
+            canonique not in index
+            or bien.get('url') == canonique
+        ):
+            index[canonique] = bien
 
     for item in emails:
-        if db.email_traite(item['cle']):
+        # Reprendre une fois les messages traités par l'ancien extracteur.
+        cle = 'bienici-v2:' + item['cle']
+
+        if db.email_traite(cle):
             bilan['deja_traites'] += 1
             continue
 
@@ -64,35 +84,70 @@ def importer_emails(db, emails):
             + (item.get('text_body') or '')
         )
 
-        liens = extraire_liens_bienici(texte)
+        annonces = extraire_annonces_bienici(item)
         non_resolus = liens_non_resolus(texte)
 
         bilan['non_resolus'] += len(non_resolus)
 
-        if not liens:
+        if not annonces:
             bilan['sans_annonce'] += 1
 
-        for url in liens:
-            ancienne = db.get_annonce_by_url(url)
+        for annonce in annonces:
+            url = annonce['url']
 
-            bien = ancienne or db.insert_annonce(
-                dict(
-                    url=url,
-                    source="Bien'ici",
-                    statut_annonce='disponible',
-                    type_annonceur='inconnu'
-                )
+            ancienne = (
+                index.get(url)
+                or db.get_annonce_by_url(url)
             )
+
+            if ancienne:
+                bien = ancienne
+                bilan['existants'] += 1
+
+            else:
+                donnees = dict(annonce)
+                donnees.setdefault('type_annonceur', 'inconnu')
+                donnees['statut_annonce'] = 'disponible'
+
+                bien = db.insert_annonce(donnees)
+                bilan['nouveaux'] += 1
 
             if not bien:
                 raise RuntimeError(
                     'Annonce non enregistrée ; message non marqué traité.'
                 )
 
-            if ancienne:
-                bilan['existants'] += 1
-            else:
-                bilan['nouveaux'] += 1
+            changements = {}
+
+            for champ, valeur in annonce.items():
+                actuel = bien.get(champ)
+                manque = actuel is None or actuel == ''
+
+                if (
+                    champ == 'type_annonceur'
+                    and actuel == 'inconnu'
+                ):
+                    manque = True
+
+                if valeur is not None and manque:
+                    changements[champ] = valeur
+
+            if bien.get('url') != url:
+                changements['url'] = url
+
+            if changements:
+                bien = db.enregistrer(
+                    'annonces',
+                    changements,
+                    bien['id']
+                )
+
+                if ancienne:
+                    bilan['enrichis'] += 1
+
+            # Les valeurs connues, y compris zéro et False,
+            # ne sont pas écrasées.
+            index[url] = bien
 
             recalculer(
                 db,
@@ -100,13 +155,12 @@ def importer_emails(db, emails):
                 annonces=[bien]
             )
 
-        # Marquer le message après la réussite de toutes les écritures.
-        # En cas de panne, le traitement pourra être relancé.
+        # Valider le message après toutes les écritures.
         # Les messages avec des liens non décodés restent à reprendre.
-        if liens and not non_resolus:
+        if annonces and not non_resolus:
             db.marquer_email(
-                item['cle'],
-                len(liens)
+                cle,
+                len(annonces)
             )
 
         bilan['messages'] += 1
