@@ -1,7 +1,7 @@
 """Application personnelle. Accès privé géré par Streamlit Community Cloud."""
 import logging
 import streamlit as st
-from validation import valider
+from validation import valider, normaliser_url
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,18 +30,102 @@ def erreur(message):
     )
 
 
+def cle_champ(nom):
+    contexte = st.session_state.get('contexte_formulaire', 'initial')
+    return 'champ_' + contexte + '_' + nom
+
+
+def preparer_formulaire(data, selection):
+    """Charger de nouveaux champs à chaque changement de fiche."""
+    if st.session_state.get('selection_formulaire_v2') == selection:
+        return
+
+    for key in list(st.session_state):
+        if key.startswith('champ_'):
+            del st.session_state[key]
+
+    revision = st.session_state.get('revision_formulaire', 0) + 1
+    st.session_state['revision_formulaire'] = revision
+    st.session_state['contexte_formulaire'] = str(revision)
+    st.session_state['selection_formulaire_v2'] = selection
+
+    for champ in (
+        'prenom', 'nom', 'telephone', 'email', 'secteur', 'notes',
+        'titre', 'url', 'source', 'commune', 'description'
+    ):
+        st.session_state[cle_champ(champ)] = str(data.get(champ) or '')
+
+    entiers = (
+        'chambres', 'chambres_rdc', 'salles_eau',
+        'chambres_min', 'chambres_rdc_min', 'salles_eau_min'
+    )
+
+    decimaux = (
+        'prix', 'budget_max', 'marge_budget', 'rayon_km',
+        'surface_habitable', 'surface_habitable_min', 'surface_terrain',
+        'surface_terrain_souhaitee', 'latitude', 'longitude',
+        'latitude_reference', 'longitude_reference'
+    )
+
+    for champ in entiers + decimaux:
+        valeur = data.get(champ)
+
+        if valeur is not None:
+            valeur = int(valeur) if champ in entiers else float(valeur)
+
+        st.session_state[cle_champ(champ)] = valeur
+
+    for champ in (
+        'recherche_maison', 'recherche_pavillon', 'recherche_maison_pierre',
+        'recherche_appartement', 'plain_pied_obligatoire',
+        'garage_obligatoire', 'salle_eau_rdc', 'sous_sol_recherche'
+    ):
+        valeur = data.get(champ)
+
+        if champ == 'salle_eau_rdc' and selection[0] == 'Annonces':
+            st.session_state[cle_champ(champ)] = (
+                valeur if isinstance(valeur, bool) else None
+            )
+        else:
+            st.session_state[cle_champ(champ)] = bool(valeur)
+
+    st.session_state[cle_champ('actif')] = bool(data.get('actif', True))
+
+    for champ in ('plain_pied', 'garage', 'sous_sol', 'maison_pierre'):
+        valeur = data.get(champ)
+        st.session_state[cle_champ(champ)] = (
+            valeur if isinstance(valeur, bool) else None
+        )
+
+    choix = {
+        'type_maison': [
+            '', 'maison', 'pavillon', 'maison_pierre', 'appartement'
+        ],
+        'type_annonceur': [
+            'inconnu', 'particulier', 'professionnel'
+        ],
+        'statut_annonce': [
+            'disponible', 'retiree', 'vendue', 'archivee'
+        ],
+        'dpe': [
+            '', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'non_applicable'
+        ]
+    }
+
+    for champ, options in choix.items():
+        valeur = data.get(champ)
+        st.session_state[cle_champ(champ)] = (
+            valeur if valeur in options else options[0]
+        )
+
+
 def nombre(label, key, data, entier=False):
-    value = data.get(key)
-
-    if value is not None:
-        value = int(value) if entier else float(value)
-
     return st.number_input(
         label,
         min_value=0 if entier else 0.0,
-        value=value,
+        value=None,
         step=1 if entier else 1.0,
-        key='champ_' + key
+        key=cle_champ(key)
     )
 
 
@@ -54,32 +138,27 @@ def coordonnees(data, reference=False):
         ('longitude', 'Longitude', 180.0)
     ]:
         champ = key + suffixe
-        value = data.get(champ)
 
         values[champ] = st.number_input(
             label,
             min_value=-limite,
             max_value=limite,
-            value=float(value) if value is not None else None,
+            value=None,
             format='%.6f',
-            key='champ_' + champ
+            key=cle_champ(champ)
         )
 
     return values
 
 
 def trois_etats(label, key, data):
-    values = [None, True, False]
-    value = data.get(key)
-
     return st.selectbox(
         label,
-        values,
-        index=values.index(value) if value in values else 0,
+        [None, True, False],
         format_func=lambda x: (
             'Inconnu' if x is None else 'Oui' if x else 'Non'
         ),
-        key='champ_' + key
+        key=cle_champ(key)
     )
 
 
@@ -88,7 +167,7 @@ def choisir(options, valeur):
 
 
 def formulaire_acquereur(data):
-    with st.form('acquereur'):
+    with st.form(cle_champ('form_acquereur')):
         result = {}
 
         for key, label in [
@@ -103,8 +182,7 @@ def formulaire_acquereur(data):
         ]:
             result[key] = st.text_input(
                 label,
-                value=data.get(key) or '',
-                key='champ_' + key
+                key=cle_champ(key)
             ).strip()
 
         st.caption(
@@ -148,35 +226,20 @@ def formulaire_acquereur(data):
             ('recherche_appartement', 'Appartement'),
             ('plain_pied_obligatoire', 'Plain-pied obligatoire'),
             ('garage_obligatoire', 'Garage obligatoire'),
-            (
-                'salle_eau_rdc',
-                'Salle d’eau au RDC obligatoire'
-            ),
+            ('salle_eau_rdc', 'Salle d’eau au RDC obligatoire'),
             ('sous_sol_recherche', 'Sous-sol souhaité')
         ]:
             result[key] = st.checkbox(
                 label,
-                value=bool(data.get(key, False)),
-                key='champ_' + key
+                key=cle_champ(key)
             )
 
         for key, label in [
             ('chambres_min', 'Chambres minimum (impératif)'),
-            (
-                'chambres_rdc_min',
-                'Chambres au RDC minimum (impératif)'
-            ),
-            (
-                'salles_eau_min',
-                'Salles d’eau minimum (impératif)'
-            )
+            ('chambres_rdc_min', 'Chambres au RDC minimum (impératif)'),
+            ('salles_eau_min', 'Salles d’eau minimum (impératif)')
         ]:
-            result[key] = nombre(
-                label,
-                key,
-                data,
-                entier=True
-            )
+            result[key] = nombre(label, key, data, entier=True)
 
         result['surface_habitable_min'] = nombre(
             'Surface habitable minimum (m², impératif)',
@@ -198,12 +261,12 @@ def formulaire_acquereur(data):
 
         result['notes'] = st.text_area(
             'Notes (non interprétées par le matching)',
-            value=data.get('notes') or ''
+            key=cle_champ('notes')
         )
 
         result['actif'] = st.checkbox(
             'Recherche active',
-            value=bool(data.get('actif', True))
+            key=cle_champ('actif')
         )
 
         submitted = st.form_submit_button(
@@ -215,7 +278,7 @@ def formulaire_acquereur(data):
 
 
 def formulaire_annonce(data):
-    with st.form('annonce'):
+    with st.form(cle_champ('form_annonce')):
         result = {}
 
         for key, label in [
@@ -226,21 +289,14 @@ def formulaire_annonce(data):
         ]:
             result[key] = st.text_input(
                 label,
-                value=data.get(key) or '',
-                key='champ_' + key
+                key=cle_champ(key)
             ).strip()
 
         for key, label, options in [
             (
                 'type_maison',
                 'Type de bien',
-                [
-                    '',
-                    'maison',
-                    'pavillon',
-                    'maison_pierre',
-                    'appartement'
-                ]
+                ['', 'maison', 'pavillon', 'maison_pierre', 'appartement']
             ),
             (
                 'type_annonceur',
@@ -255,24 +311,13 @@ def formulaire_annonce(data):
             (
                 'dpe',
                 'DPE déclaré (informatif)',
-                [
-                    '',
-                    'A',
-                    'B',
-                    'C',
-                    'D',
-                    'E',
-                    'F',
-                    'G',
-                    'non_applicable'
-                ]
+                ['', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'non_applicable']
             )
         ]:
             result[key] = st.selectbox(
                 label,
                 options,
-                index=choisir(options, data.get(key)),
-                key='champ_' + key
+                key=cle_champ(key)
             ) or None
 
         for key, label in [
@@ -287,12 +332,7 @@ def formulaire_annonce(data):
             ('chambres_rdc', 'Chambres au RDC'),
             ('salles_eau', 'Salles d’eau')
         ]:
-            result[key] = nombre(
-                label,
-                key,
-                data,
-                entier=True
-            )
+            result[key] = nombre(label, key, data, entier=True)
 
         for key, label in [
             ('plain_pied', 'Plain-pied'),
@@ -313,7 +353,7 @@ def formulaire_annonce(data):
 
         result['description'] = st.text_area(
             'Description (non interprétée automatiquement)',
-            value=data.get('description') or ''
+            key=cle_champ('description')
         )
 
         submitted = st.form_submit_button(
@@ -333,7 +373,6 @@ def editeur(db, acheteurs=False):
 
     titre = 'Acquéreurs' if acheteurs else 'Annonces'
     st.title(titre)
-
     by_id = {str(x['id']): x for x in rows}
 
     def libelle(key):
@@ -342,30 +381,58 @@ def editeur(db, acheteurs=False):
 
         d = by_id[key]
 
-        if acheteurs:
-            texte = f'{d.get("prenom", "")} {d.get("nom", "")}'
-        else:
-            texte = d.get('titre') or d.get('url') or 'Sans titre'
-
-        return texte + f' — {key}'
+        return (
+            f'{d.get("prenom", "")} {d.get("nom", "")}'
+            if acheteurs
+            else d.get('titre') or d.get('url') or 'Sans titre'
+        ) + f' — {key}'
 
     identifiant = st.selectbox(
         'Créer ou modifier',
         ['__nouveau__'] + list(by_id),
-        format_func=libelle
+        format_func=libelle,
+        key='selecteur_' + titre
     )
 
-    precedent = st.session_state.get('fiche_courante')
-    courant = (titre, identifiant)
-
-    if precedent != courant:
-        for key in list(st.session_state):
-            if key.startswith('champ_'):
-                del st.session_state[key]
-
-        st.session_state['fiche_courante'] = courant
-
     data = by_id.get(identifiant, {})
+    preparer_formulaire(data, (titre, identifiant))
+
+    if not acheteurs and data:
+        if data.get('url'):
+            try:
+                adresse = normaliser_url(data['url'])
+                st.link_button(
+                    'Ouvrir l’annonce sur le site',
+                    adresse
+                )
+            except ValueError:
+                st.warning(
+                    'Cette fiche contient une ancienne URL invalide. '
+                    'Vous pouvez la corriger ou archiver la fiche.'
+                )
+
+        if data.get('statut_annonce') != 'archivee':
+            if st.button(
+                'Archiver cette annonce',
+                key='archiver_' + str(data['id'])
+            ):
+                try:
+                    db.enregistrer(
+                        'annonces',
+                        {'statut_annonce': 'archivee'},
+                        data['id']
+                    )
+                except Exception:
+                    erreur('Archivage impossible.')
+                    return
+
+                st.session_state.pop('selection_formulaire_v2', None)
+                st.rerun()
+
+    st.caption(
+        'Le choix dans la liste charge la fiche. '
+        'Enregistrer sert uniquement à sauvegarder vos modifications.'
+    )
 
     if acheteurs:
         submitted, result = formulaire_acquereur(data)
@@ -476,7 +543,6 @@ def import_bienici(db):
                 st.session_state['emails_preview'] = (
                     get_bienici_emails(int(limite))
                 )
-
         except Exception:
             erreur('Impossible de lire les e-mails Yahoo.')
 
@@ -632,19 +698,16 @@ def page_matching(db):
         )
 
         with st.expander(titre_resultat):
-            if m.get('score') is None:
-                score_affiche = 'non calculable'
-            else:
-                score_affiche = f'{m["score"]} %'
-
-            if m.get('couverture') is None:
-                couverture_affiche = 'à recalculer'
-            else:
-                couverture_affiche = f'{m["couverture"]} %'
+            score_affiche = (
+                'non calculable'
+                if m.get('score') is None
+                else f'{m["score"]} %'
+            )
 
             st.write(
                 f'Adéquation sur critères connus : {score_affiche}'
-                f' · Critères vérifiés : {couverture_affiche}'
+                f' · Critères vérifiés : '
+                f'{m.get("couverture") if m.get("couverture") is not None else "à recalculer"} %'
             )
 
             st.caption(
@@ -663,12 +726,8 @@ def page_matching(db):
                 )
 
             suivi = [
-                'nouveau',
-                'a_contacter',
-                'propose',
-                'visite',
-                'refuse',
-                'clos'
+                'nouveau', 'a_contacter', 'propose',
+                'visite', 'refuse', 'clos'
             ]
 
             if m.get('statut') and m['statut'] not in suivi:
@@ -696,7 +755,6 @@ def page_matching(db):
                             },
                             m['id']
                         )
-
                         st.success('Suivi enregistré.')
 
                     except Exception:
@@ -777,16 +835,8 @@ def main(default='Tableau de bord'):
 
             cols = st.columns(3)
 
-            cols[0].metric(
-                'Acquéreurs actifs',
-                len(acheteurs)
-            )
-
-            cols[1].metric(
-                'Annonces disponibles',
-                len(biens)
-            )
-
+            cols[0].metric('Acquéreurs actifs', len(acheteurs))
+            cols[1].metric('Annonces disponibles', len(biens))
             cols[2].metric(
                 'Correspondances confirmées',
                 sum(
@@ -797,26 +847,19 @@ def main(default='Tableau de bord'):
 
             st.write('Dernières annonces disponibles')
 
-            dernieres_annonces = sorted(
+            for bien in sorted(
                 biens,
                 key=lambda b: b.get('imported_at') or '',
                 reverse=True
-            )[:10]
-
-            for bien in dernieres_annonces:
+            )[:10]:
                 st.write(
                     bien.get('titre') or 'Annonce à compléter'
                 )
 
-                commune = bien.get('commune') or 'Commune inconnue'
-
-                prix = (
-                    bien['prix']
-                    if bien.get('prix') is not None
-                    else 'Prix inconnu'
+                st.write(
+                    f'{bien.get("commune") or "Commune inconnue"}'
+                    f' · {bien.get("prix") if bien.get("prix") is not None else "Prix inconnu"}'
                 )
-
-                st.write(f'{commune} · {prix}')
 
                 if bien.get('url'):
                     st.link_button('Ouvrir', bien['url'])
