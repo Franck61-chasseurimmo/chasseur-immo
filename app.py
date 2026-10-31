@@ -355,7 +355,6 @@ def editeur(db, acheteurs=False):
         format_func=libelle
     )
 
-    # Charger les valeurs de la fiche sélectionnée.
     precedent = st.session_state.get('fiche_courante')
     courant = (titre, identifiant)
 
@@ -452,9 +451,10 @@ def import_bienici(db):
     st.title('Import Bien’ici')
 
     st.info(
-        'Import des liens d’alertes. Prix, commune et caractéristiques '
-        'sont à compléter dans Annonces. Aucun contenu de page '
-        'immobilière n’est téléchargé.'
+        'Import des alertes Bien’ici : lien, titre, prix, commune '
+        'et surface sont récupérés lorsqu’ils sont présents '
+        'dans l’e-mail. Les autres critères restent à compléter '
+        'dans Annonces.'
     )
 
     limite = st.number_input(
@@ -511,6 +511,7 @@ def import_bienici(db):
             st.success(
                 f'{bilan["nouveaux"]} nouvelle(s) annonce(s), '
                 f'{bilan["existants"]} lien(s) déjà présent(s), '
+                f'{bilan["enrichis"]} fiche(s) complétée(s), '
                 f'{bilan["deja_traites"]} e-mail(s) déjà traité(s).'
             )
 
@@ -522,9 +523,9 @@ def import_bienici(db):
                 )
 
             st.caption(
-                'Les nouvelles annonces contiennent des informations '
-                'inconnues. Complétez leur fiche pour obtenir '
-                'un matching utile.'
+                'Les informations absentes de l’e-mail restent '
+                'inconnues. Vérifiez les fiches dans Annonces '
+                'avant de proposer un bien.'
             )
 
         except Exception:
