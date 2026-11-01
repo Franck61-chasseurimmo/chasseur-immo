@@ -1,17 +1,21 @@
-"""Lecture des alertes Yahoo et extraction locale des annonces Bien'ici."""
+"""Lecture IMAP seule ; validation stricte des liens sans requête vers les annonces."""
+
 import base64
 import email
 import hashlib
 import html
 import imaplib
 import re
+
 from email.header import decode_header
 from email.utils import parseaddr
-from urllib.parse import urlsplit, urlunsplit, unquote
 from html.parser import HTMLParser
+from urllib.parse import unquote, urlsplit, urlunsplit
+
 from validation import normaliser_url
 
-IMAP_SERVER = 'imap.mail.yahoo.com'
+
+IMAP_SERVER = "imap.mail.yahoo.com"
 IMAP_PORT = 993
 
 
@@ -21,13 +25,13 @@ def get_yahoo_connection():
     mail = imaplib.IMAP4_SSL(
         IMAP_SERVER,
         IMAP_PORT,
-        timeout=30
+        timeout=30,
     )
 
     try:
         mail.login(
-            st.secrets['YAHOO_EMAIL'],
-            st.secrets['YAHOO_APP_PASSWORD']
+            st.secrets["YAHOO_EMAIL"],
+            st.secrets["YAHOO_APP_PASSWORD"],
         )
     except Exception:
         try:
@@ -42,33 +46,33 @@ def get_yahoo_connection():
 def decode_email_subject(subject):
     result = []
 
-    for value, charset in decode_header(subject or ''):
+    for value, charset in decode_header(subject or ""):
         if isinstance(value, bytes):
             try:
                 value = value.decode(
-                    charset or 'utf-8',
-                    errors='replace'
+                    charset or "utf-8",
+                    errors="replace",
                 )
             except LookupError:
                 value = value.decode(
-                    'utf-8',
-                    errors='replace'
+                    "utf-8",
+                    errors="replace",
                 )
 
         result.append(value)
 
-    return ''.join(result)
+    return "".join(result)
 
 
 def get_email_body(message):
     bodies = {
-        'text/plain': [],
-        'text/html': []
+        "text/plain": [],
+        "text/html": [],
     }
 
     def contenu(part):
         if (
-            part.get_content_disposition() == 'attachment'
+            part.get_content_disposition() == "attachment"
             or part.get_filename()
         ):
             return
@@ -84,7 +88,7 @@ def get_email_body(message):
 
         if (
             part.is_multipart()
-            or part.get_content_disposition() == 'attachment'
+            or part.get_content_disposition() == "attachment"
             or typ not in bodies
         ):
             continue
@@ -96,112 +100,139 @@ def get_email_body(message):
 
         try:
             value = payload.decode(
-                part.get_content_charset() or 'utf-8',
-                errors='replace'
+                part.get_content_charset() or "utf-8",
+                errors="replace",
             )
         except LookupError:
             value = payload.decode(
-                'utf-8',
-                errors='replace'
+                "utf-8",
+                errors="replace",
             )
 
         bodies[typ].append(value)
 
     return (
-        '\n'.join(bodies['text/plain']),
-        '\n'.join(bodies['text/html'])
+        "\n".join(bodies["text/plain"]),
+        "\n".join(bodies["text/html"]),
     )
 
 
-def get_bienici_emails(limit=100):
+def get_emails_alertes(limit=100, source="bienici"):
+    domaines = {
+        "bienici": "bienici.com",
+        "leboncoin": "leboncoin.fr",
+    }
+
+    if source not in domaines:
+        raise ValueError("Source d’alertes inconnue.")
+
+    domaine_attendu = domaines[source]
+
     if not isinstance(limit, int) or not 1 <= limit <= 5000:
         raise ValueError(
-            'La limite doit être comprise entre 1 et 5000 e-mails.'
+            "La limite doit être comprise entre 1 et 5000 e-mails."
         )
 
     mail = get_yahoo_connection()
 
     try:
-        status, _ = mail.select('INBOX', readonly=True)
+        status, _ = mail.select(
+            "INBOX",
+            readonly=True,
+        )
 
-        if status != 'OK':
-            raise RuntimeError('Impossible de lire INBOX.')
+        if status != "OK":
+            raise RuntimeError("Impossible de lire INBOX.")
 
-        _, validity_data = mail.response('UIDVALIDITY')
-        validity = (validity_data or [b''])[0] or b''
+        _, validity_data = mail.response("UIDVALIDITY")
+        validity = (validity_data or [b""])[0] or b""
 
         if not validity:
             raise RuntimeError(
-                'UIDVALIDITY indisponible : import interrompu '
-                'pour éviter des collisions.'
+                "UIDVALIDITY indisponible : import interrompu "
+                "pour éviter des collisions."
             )
 
         status, data = mail.uid(
-            'search',
+            "search",
             None,
-            '(FROM "bienici.com")'
+            f'(FROM "{domaine_attendu}")',
         )
 
-        if status != 'OK':
-            raise RuntimeError('La recherche IMAP a échoué.')
+        if status != "OK":
+            raise RuntimeError("La recherche IMAP a échoué.")
 
         results = []
 
-        for uid in reversed((data[0] or b'').split()[-limit:]):
+        for uid in reversed((data[0] or b"").split()[-limit:]):
             status, parts = mail.uid(
-                'fetch',
+                "fetch",
                 uid,
-                '(BODY.PEEK[])'
+                "(BODY.PEEK[])",
             )
 
-            if status != 'OK':
+            if status != "OK":
                 raise RuntimeError(
-                    'Lecture IMAP interrompue ; relancez pour reprendre.'
+                    "Lecture IMAP interrompue ; relancez pour reprendre."
                 )
 
             raw = next(
-                (p[1] for p in parts if isinstance(p, tuple)),
-                None
+                (
+                    part[1]
+                    for part in parts
+                    if isinstance(part, tuple)
+                ),
+                None,
             )
 
             if raw is None:
                 raise RuntimeError(
-                    'Message IMAP incomplet ; relancez pour reprendre.'
+                    "Message IMAP incomplet ; relancez pour reprendre."
                 )
 
             message = email.message_from_bytes(raw)
-            sender = message.get('From', '')
-            domaine = parseaddr(sender)[1].rsplit('@', 1)[-1].lower()
+            sender = message.get("From", "")
+
+            domaine = (
+                parseaddr(sender)[1]
+                .rsplit("@", 1)[-1]
+                .lower()
+            )
 
             if (
-                domaine != 'bienici.com'
-                and not domaine.endswith('.bienici.com')
+                domaine != domaine_attendu
+                and not domaine.endswith("." + domaine_attendu)
             ):
                 continue
 
             text, markup = get_email_body(message)
 
+            # Le compte, INBOX, UIDVALIDITY et UID évitent
+            # les collisions entre les différentes boîtes.
             import streamlit as st
 
             material = (
                 f'{st.secrets["YAHOO_EMAIL"]}'
-                f'|INBOX|{validity!r}|{uid!r}'
+                f"|INBOX|{validity!r}|{uid!r}"
             )
 
-            cle = hashlib.sha256(material.encode()).hexdigest()
+            cle = hashlib.sha256(
+                material.encode()
+            ).hexdigest()
 
             results.append(
-                dict(
-                    email_id=uid.decode(),
-                    cle=cle,
-                    subject=decode_email_subject(
-                        message.get('Subject')
+                {
+                    "email_id": uid.decode(),
+                    "cle": cle,
+                    "subject": decode_email_subject(
+                        message.get("Subject")
                     ),
-                    sender=sender,
-                    date=message.get('Date', ''),
-                    text_body=text,
-                    html_body=markup
-                )
+                    "sender": sender,
+                    "date": message.get("Date", ""),
+                    "text_body": text,
+                    "html_body": markup,
+                    "source_import": source,
+                }
             )
 
         return results
@@ -213,16 +244,23 @@ def get_bienici_emails(limit=100):
             pass
 
 
+def get_bienici_emails(limit=100):
+    return get_emails_alertes(
+        limit=limit,
+        source="bienici",
+    )
+
+
 def _destination_lien(url):
     """Décoder localement les liens Mailjet ; ne jamais les visiter."""
     try:
-        url = html.unescape(url or '').strip()
+        url = html.unescape(url or "").strip()
 
         for _ in range(3):
             parts = urlsplit(url)
 
             if (
-                parts.scheme not in ('http', 'https')
+                parts.scheme not in ("http", "https")
                 or not parts.hostname
             ):
                 return None
@@ -230,21 +268,21 @@ def _destination_lien(url):
             if parts.username or parts.password:
                 return None
 
-            if parts.hostname != 'link.bienici.com':
+            if parts.hostname != "link.bienici.com":
                 return url
 
             if len(url) > 32000:
                 return None
 
             token = unquote(
-                parts.path.rstrip('/').rsplit('/', 1)[-1]
+                parts.path.rstrip("/").rsplit("/", 1)[-1]
             )
 
             url = base64.b64decode(
-                token + '=' * (-len(token) % 4),
-                altchars=b'-_',
-                validate=True
-            ).decode('utf-8')
+                token + "=" * (-len(token) % 4),
+                altchars=b"-_",
+                validate=True,
+            ).decode("utf-8")
 
         return None
 
@@ -259,25 +297,31 @@ def extraire_url_bienici(url):
         return None
 
     try:
-        parts = urlsplit(normaliser_url(destination))
+        parts = urlsplit(
+            normaliser_url(destination)
+        )
 
         if parts.hostname not in (
-            'bienici.com',
-            'www.bienici.com'
+            "bienici.com",
+            "www.bienici.com",
         ):
             return None
 
-        if not re.fullmatch(r'/annonce/[^/]+/?', parts.path):
+        if not re.fullmatch(
+            r"/annonce/[^/]+/?",
+            parts.path,
+        ):
             return None
 
-        # Conserver uniquement l'adresse du bien, sans suivi personnel.
+        # Les paramètres d’alerte et le jeton du destinataire
+        # ne sont pas nécessaires pour ouvrir l’annonce.
         return urlunsplit(
             (
-                'https',
-                'www.bienici.com',
-                parts.path.rstrip('/'),
-                '',
-                ''
+                "https",
+                "www.bienici.com",
+                parts.path.rstrip("/"),
+                "",
+                "",
             )
         )
 
@@ -288,7 +332,7 @@ def extraire_url_bienici(url):
 def _urls(texte):
     return re.findall(
         r"https?://[^\s\"'<>]+",
-        html.unescape(texte or '')
+        html.unescape(texte or ""),
     )
 
 
@@ -297,7 +341,7 @@ def extraire_liens_bienici(texte):
 
     for url in _urls(texte):
         valide = extraire_url_bienici(
-            url.rstrip('.,);]')
+            url.rstrip(".,);]")
         )
 
         if valide and valide not in resultat:
@@ -310,20 +354,27 @@ def liens_non_resolus(texte):
     resultat = []
 
     for url in _urls(texte):
-        url = url.rstrip('.,);]')
+        url = url.rstrip(".,);]")
 
         try:
             parts = urlsplit(url)
 
-            if parts.hostname != 'link.bienici.com':
+            if parts.hostname != "link.bienici.com":
                 continue
 
             if parts.path.startswith(
-                ('/oo', '/unsub', '/open', '/static', '/images')
+                (
+                    "/oo",
+                    "/unsub",
+                    "/open",
+                    "/static",
+                    "/images",
+                )
             ):
                 continue
 
-            # Une destination connue hors annonce n'est pas une erreur.
+            # Une destination connue hors annonce
+            # n’est pas une erreur de décodage.
             if (
                 _destination_lien(url) is None
                 and url not in resultat
@@ -341,29 +392,30 @@ class _LecteurLiens(HTMLParser):
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
+
         self.liens = []
         self.textes = []
         self.courant = None
         self.masque = 0
 
     def handle_starttag(self, tag, attrs):
-        if tag in ('script', 'style'):
+        if tag in ("script", "style"):
             self.masque += 1
 
-        if tag == 'a':
+        if tag == "a":
             if self.courant:
                 self.liens.append(self.courant)
 
             self.courant = [
-                dict(attrs).get('href', ''),
-                []
+                dict(attrs).get("href", ""),
+                [],
             ]
 
     def handle_endtag(self, tag):
-        if tag in ('script', 'style') and self.masque:
+        if tag in ("script", "style") and self.masque:
             self.masque -= 1
 
-        if tag == 'a' and self.courant:
+        if tag == "a" and self.courant:
             self.liens.append(self.courant)
             self.courant = None
 
@@ -377,19 +429,19 @@ class _LecteurLiens(HTMLParser):
 
 def _texte_propre(texte):
     return re.sub(
-        r'\s+',
-        ' ',
-        html.unescape(texte or '')
+        r"\s+",
+        " ",
+        html.unescape(texte or ""),
     ).strip()
 
 
 def extraire_annonces_bienici(email_data):
-    """Extraire uniquement les caractéristiques écrites dans l'e-mail."""
-    texte = email_data.get('text_body') or ''
-    markup = email_data.get('html_body') or ''
+    """Extraire uniquement les caractéristiques écrites dans l’e-mail."""
+    texte = email_data.get("text_body") or ""
+    markup = email_data.get("html_body") or ""
     groupes = {}
 
-    def ajouter(url, label=''):
+    def ajouter(url, label=""):
         canonique = extraire_url_bienici(url)
 
         if canonique:
@@ -407,18 +459,22 @@ def extraire_annonces_bienici(email_data):
         lecteur.liens.append(lecteur.courant)
 
     for url, morceaux in lecteur.liens:
-        ajouter(url, ' '.join(morceaux))
+        ajouter(
+            url,
+            " ".join(morceaux),
+        )
 
-    # Dans la version texte, [URL] suit généralement son libellé.
+    # La version texte des alertes place généralement
+    # [URL] après son libellé.
     precedent = 0
 
     for match in re.finditer(
-        r'\[(https?://[^\]\s]+)\]',
-        texte
+        r"\[(https?://[^\]\s]+)\]",
+        texte,
     ):
         ajouter(
             match.group(1),
-            texte[precedent:match.start()][-500:]
+            texte[precedent:match.start()][-500:],
         )
         precedent = match.end()
 
@@ -426,20 +482,23 @@ def extraire_annonces_bienici(email_data):
         ajouter(url)
 
     contexte = _texte_propre(
-        ' '.join(lecteur.textes) + ' ' + texte
+        " ".join(lecteur.textes) + " " + texte
     )
 
     contexte = re.sub(
-        r'https?://[^\s]+',
-        '',
-        contexte
+        r"https?://[^\s]+",
+        "",
+        contexte,
     )
 
-    agence_unique = len(groupes) == 1 and bool(
-        re.search(
-            r"\bl['’]agence\b.{0,160}?\bvous propose\b",
-            contexte,
-            re.I
+    agence_unique = (
+        len(groupes) == 1
+        and bool(
+            re.search(
+                r"\bl['’]agence\b.{0,160}?\bvous propose\b",
+                contexte,
+                re.I,
+            )
         )
     )
 
@@ -447,77 +506,80 @@ def extraire_annonces_bienici(email_data):
 
     for url, labels in groupes.items():
         bien = {
-            'url': url,
-            'source': "Bien'ici"
+            "url": url,
+            "source": "Bien'ici",
         }
 
         titres = [
-            label for label in labels
+            label
+            for label in labels
             if re.match(
-                r'^(maison|pavillon|appartement|studio)\b',
+                r"^(maison|pavillon|appartement|studio)\b",
                 label,
-                re.I
+                re.I,
             )
         ]
 
         if titres:
             titre = titres[0]
-            bien['titre'] = titre
+            bien["titre"] = titre
 
             genre = titre.split()[0].lower()
 
-            bien['type_maison'] = (
-                'appartement'
-                if genre == 'studio'
+            bien["type_maison"] = (
+                "appartement"
+                if genre == "studio"
                 else genre
             )
 
             surface = re.search(
-                r'(\d+(?:[.,]\d+)?)\s*m(?:²|2)\b',
+                r"(\d+(?:[.,]\d+)?)\s*m(?:²|2)\b",
                 titre,
-                re.I
+                re.I,
             )
 
             if surface:
-                bien['surface_habitable'] = float(
-                    surface.group(1).replace(',', '.')
+                bien["surface_habitable"] = float(
+                    surface.group(1).replace(",", ".")
                 )
 
         for label in labels:
             prix = re.search(
-                r'(\d[\d ]*(?:[.,]\d{1,2})?)\s*€',
-                label
+                r"(\d[\d ]*(?:[.,]\d{1,2})?)\s*€",
+                label,
             )
 
-            if prix and 'prix' not in bien:
-                bien['prix'] = float(
+            if prix and "prix" not in bien:
+                bien["prix"] = float(
                     prix.group(1)
-                    .replace(' ', '')
-                    .replace(',', '.')
+                    .replace(" ", "")
+                    .replace(",", ".")
                 )
 
             commune = re.fullmatch(
-                r'\d{5}\s+(.+)',
-                label
+                r"\d{5}\s+(.+)",
+                label,
             )
 
-            if commune and 'commune' not in bien:
-                bien['commune'] = commune.group(1).strip()
+            if commune and "commune" not in bien:
+                bien["commune"] = commune.group(1).strip()
 
             chambres = re.search(
-                r'\b(\d+)\s+chambres?\b',
+                r"\b(\d+)\s+chambres?\b",
                 label,
-                re.I
+                re.I,
             )
 
-            if chambres and 'chambres' not in bien:
-                bien['chambres'] = int(chambres.group(1))
+            if chambres and "chambres" not in bien:
+                bien["chambres"] = int(
+                    chambres.group(1)
+                )
 
         if agence_unique:
-            bien['type_annonceur'] = 'professionnel'
+            bien["type_annonceur"] = "professionnel"
 
         # « 5 pièces » ne signifie pas « 5 chambres ».
-        # Les équipements absents de l'e-mail restent inconnus.
+        # Aucun équipement n’est deviné.
         resultat.append(bien)
 
     return resultat
@@ -528,6 +590,9 @@ def get_annonces_from_bienici_emails(limit=100):
 
     for item in get_bienici_emails(limit):
         for bien in extraire_annonces_bienici(item):
-            resultat.setdefault(bien['url'], bien)
+            resultat.setdefault(
+                bien["url"],
+                bien,
+            )
 
     return list(resultat.values())
