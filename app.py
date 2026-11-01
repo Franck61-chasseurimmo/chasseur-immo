@@ -372,6 +372,13 @@ def editeur(db, acheteurs=False):
     titre = 'Acquéreurs' if acheteurs else 'Annonces'
     st.title(titre)
 
+    if not acheteurs and st.session_state.pop('annonce_supprimee', None):
+        st.session_state.pop('selecteur_Annonces', None)
+        st.session_state.pop('selection_formulaire_v2', None)
+        st.success(
+            'Annonce et correspondances liées supprimées définitivement.'
+        )
+
     by_id = {str(x['id']): x for x in rows}
 
     def libelle(key):
@@ -428,6 +435,39 @@ def editeur(db, acheteurs=False):
 
                 st.session_state.pop('selection_formulaire_v2', None)
                 st.rerun()
+
+        with st.expander('Supprimer définitivement cette annonce'):
+            st.warning(
+                'Cette action efface cette annonce et toutes ses '
+                'correspondances, y compris leur suivi commercial. '
+                'Elle est irréversible. '
+                'L’annonce reste publiée sur son site d’origine.'
+            )
+
+            with st.form('suppression_' + str(data['id'])):
+                confirme = st.checkbox(
+                    'Je confirme la suppression définitive de cette annonce',
+                    key='confirmer_suppression_' + str(data['id']),
+                )
+
+                supprimer = st.form_submit_button(
+                    'Supprimer définitivement'
+                )
+
+            if supprimer:
+                if not confirme:
+                    st.error(
+                        'Cochez la confirmation pour supprimer cette annonce.'
+                    )
+                else:
+                    try:
+                        db.supprimer_annonce(data['id'])
+                    except Exception:
+                        erreur('Suppression impossible.')
+                        return
+
+                    st.session_state['annonce_supprimee'] = str(data['id'])
+                    st.rerun()
 
     st.caption(
         'Le choix dans la liste charge la fiche. '
