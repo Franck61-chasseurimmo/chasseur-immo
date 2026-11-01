@@ -25,11 +25,11 @@ def recalculer(db, acquereurs=None, annonces=None):
     nombre = 0
 
     for bien in biens:
-        if bien.get("statut_annonce", "disponible") != "disponible":
+        if bien.get('statut_annonce', 'disponible') != 'disponible':
             continue
 
         for acheteur in acheteurs:
-            if not acheteur.get("actif", True):
+            if not acheteur.get('actif', True):
                 continue
 
             resultat = matcher_acquereur(
@@ -39,8 +39,8 @@ def recalculer(db, acquereurs=None, annonces=None):
 
             db.insert_match(
                 dict(
-                    acquereur_id=acheteur["id"],
-                    annonce_id=bien["id"],
+                    acquereur_id=acheteur['id'],
+                    annonce_id=bien['id'],
                     **resultat,
                 )
             )
@@ -50,13 +50,18 @@ def recalculer(db, acquereurs=None, annonces=None):
     return nombre
 
 
-def importer_emails(db, emails, source="bienici"):
-    if source == "bienici":
+def importer_emails(
+    db,
+    emails,
+    source='bienici',
+    enrichir=False,
+):
+    if source == 'bienici':
         extraire = extraire_annonces_bienici
         normaliser = extraire_url_bienici
-        prefixe = "bienici-v2:"
+        prefixe = 'bienici-v2:'
 
-    elif source == "leboncoin":
+    elif source == 'leboncoin':
         from leboncoin_import import (
             extraire_annonces_leboncoin,
             extraire_url_leboncoin,
@@ -64,53 +69,56 @@ def importer_emails(db, emails, source="bienici"):
 
         extraire = extraire_annonces_leboncoin
         normaliser = extraire_url_leboncoin
-        prefixe = "leboncoin-v1:"
+        prefixe = 'leboncoin-v1:'
 
     else:
-        raise ValueError("Source d’alertes inconnue.")
+        raise ValueError('Source d’alertes inconnue.')
 
     bilan = {
-        "messages": 0,
-        "nouveaux": 0,
-        "existants": 0,
-        "enrichis": 0,
-        "deja_traites": 0,
-        "non_resolus": 0,
-        "sans_annonce": 0,
+        'messages': 0,
+        'nouveaux': 0,
+        'existants': 0,
+        'enrichis': 0,
+        'deja_traites': 0,
+        'non_resolus': 0,
+        'sans_annonce': 0,
+        'criteres_lus': 0,
+        'criteres_erreurs': 0,
+        'criteres_reportes': 0,
     }
 
+    tentatives = set()
     acheteurs = db.get_acquereurs()
     index = {}
 
     # Retrouver les annonces de cette source,
     # y compris les anciennes URL de suivi.
     for bien in db.get_annonces():
-        canonique = normaliser(bien.get("url"))
+        canonique = normaliser(bien.get('url'))
 
         if canonique and (
             canonique not in index
-            or bien.get("url") == canonique
+            or bien.get('url') == canonique
         ):
             index[canonique] = bien
 
     for item in emails:
-        # Reprendre les anciens messages une fois
-        # avec le nouvel extracteur.
-        cle = prefixe + item["cle"]
+        # Conserver les identifiants de traitement existants.
+        cle = prefixe + item['cle']
 
         if db.email_traite(cle):
-            bilan["deja_traites"] += 1
+            bilan['deja_traites'] += 1
             continue
 
         texte = (
-            (item.get("html_body") or "")
-            + "\n"
-            + (item.get("text_body") or "")
+            (item.get('html_body') or '')
+            + '\n'
+            + (item.get('text_body') or '')
         )
 
         annonces = extraire(item)
 
-        if source == "leboncoin":
+        if source == 'leboncoin':
             from leboncoin_import import (
                 liens_leboncoin_non_resolus,
             )
@@ -120,13 +128,13 @@ def importer_emails(db, emails, source="bienici"):
         else:
             non_resolus = liens_non_resolus(texte)
 
-        bilan["non_resolus"] += len(non_resolus)
+        bilan['non_resolus'] += len(non_resolus)
 
         if not annonces:
-            bilan["sans_annonce"] += 1
+            bilan['sans_annonce'] += 1
 
         for annonce in annonces:
-            url = annonce["url"]
+            url = annonce['url']
 
             ancienne = (
                 index.get(url)
@@ -135,56 +143,95 @@ def importer_emails(db, emails, source="bienici"):
 
             if ancienne:
                 bien = ancienne
-                bilan["existants"] += 1
+                bilan['existants'] += 1
 
             else:
                 donnees = dict(annonce)
 
                 donnees.setdefault(
-                    "type_annonceur",
-                    "inconnu",
+                    'type_annonceur',
+                    'inconnu',
                 )
 
-                donnees["statut_annonce"] = "disponible"
+                donnees['statut_annonce'] = 'disponible'
                 bien = db.insert_annonce(donnees)
-                bilan["nouveaux"] += 1
+                bilan['nouveaux'] += 1
 
             if not bien:
                 raise RuntimeError(
-                    "Annonce non enregistrée ; "
-                    "message non marqué traité."
+                    'Annonce non enregistrée ; '
+                    'message non marqué traité.'
                 )
 
             changements = {}
 
             for champ, valeur in annonce.items():
                 actuel = bien.get(champ)
-                manque = actuel is None or actuel == ""
+                manque = actuel is None or actuel == ''
 
                 if (
-                    champ == "type_annonceur"
-                    and actuel == "inconnu"
+                    champ == 'type_annonceur'
+                    and actuel == 'inconnu'
                 ):
                     manque = True
 
                 if valeur is not None and manque:
                     changements[champ] = valeur
 
-            if bien.get("url") != url:
-                changements["url"] = url
+            if bien.get('url') != url:
+                changements['url'] = url
 
             if changements:
                 bien = db.enregistrer(
-                    "annonces",
+                    'annonces',
                     changements,
-                    bien["id"],
+                    bien['id'],
                 )
 
                 if ancienne:
-                    bilan["enrichis"] += 1
+                    bilan['enrichis'] += 1
 
             # Les valeurs connues, y compris zéro et False,
             # ne sont pas écrasées.
+            if (
+                enrichir
+                and source == 'bienici'
+                and bien.get(
+                    'statut_annonce',
+                    'disponible',
+                ) == 'disponible'
+            ):
+                from criteres_bienici import (
+                    completer_annonce,
+                    LectureImpossible,
+                    VERSION,
+                )
+
+                deja_analysee = (
+                    bien.get('extraction_criteres') or {}
+                ).get('version') == VERSION
+
+                if (
+                    not deja_analysee
+                    and url not in tentatives
+                ):
+                    if len(tentatives) >= 20:
+                        bilan['criteres_reportes'] += 1
+
+                    else:
+                        tentatives.add(url)
+
+                        try:
+                            bien, lu = completer_annonce(
+                                db,
+                                bien,
+                            )
+
+                            bilan['criteres_lus'] += int(lu)
+
+                        except LectureImpossible:
+                            bilan['criteres_erreurs'] += 1
+
             index[url] = bien
 
             recalculer(
@@ -199,6 +246,61 @@ def importer_emails(db, emails, source="bienici"):
                 len(annonces),
             )
 
-        bilan["messages"] += 1
+        bilan['messages'] += 1
+
+    return bilan
+
+
+def completer_biens_bienici(db, limite=20):
+    """Reprendre les fiches déjà importées."""
+
+    from criteres_bienici import (
+        completer_annonce,
+        LectureImpossible,
+        VERSION,
+    )
+
+    acheteurs = db.get_acquereurs()
+
+    candidats = [
+        bien
+        for bien in db.get_annonces(actives=True)
+        if extraire_url_bienici(bien.get('url'))
+        and bien.get(
+            'statut_annonce',
+            'disponible',
+        ) == 'disponible'
+        and (
+            bien.get('extraction_criteres') or {}
+        ).get('version') != VERSION
+    ]
+
+    bilan = {
+        'analyses': 0,
+        'erreurs': 0,
+        'restants': max(
+            0,
+            len(candidats) - limite,
+        ),
+    }
+
+    for bien in candidats[:limite]:
+        try:
+            bien, lu = completer_annonce(
+                db,
+                bien,
+            )
+
+        except LectureImpossible:
+            bilan['erreurs'] += 1
+            continue
+
+        bilan['analyses'] += int(lu)
+
+        recalculer(
+            db,
+            acquereurs=acheteurs,
+            annonces=[bien],
+        )
 
     return bilan
