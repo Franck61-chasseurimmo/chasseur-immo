@@ -1,69 +1,144 @@
 """Matching explicable : inconnu, préférence et incompatibilité sont distincts."""
+
 import math
 import unicodedata
 
 
 def normaliser_texte(value):
-    return ''.join(c for c in unicodedata.normalize('NFKD', str(value or '').lower())
-                   if not unicodedata.combining(c)).strip()
+    return ''.join(
+        c
+        for c in unicodedata.normalize(
+            'NFKD',
+            str(value or '').lower(),
+        )
+        if not unicodedata.combining(c)
+    ).strip()
 
 
 def calculer_distance_km(lat1, lon1, lat2, lon2):
-    if any(x is None for x in (lat1, lon1, lat2, lon2)):
+    if any(
+        valeur is None
+        for valeur in (lat1, lon1, lat2, lon2)
+    ):
         return None
 
-    lat1, lon1, lat2, lon2 = map(float, (lat1, lon1, lat2, lon2))
+    lat1, lon1, lat2, lon2 = map(
+        float,
+        (lat1, lon1, lat2, lon2),
+    )
 
-    if not all(math.isfinite(x) for x in (lat1, lon1, lat2, lon2)):
+    if not all(
+        math.isfinite(valeur)
+        for valeur in (lat1, lon1, lat2, lon2)
+    ):
         raise ValueError('Coordonnées non finies.')
 
-    if not (-90 <= lat1 <= 90 and -90 <= lat2 <= 90 and -180 <= lon1 <= 180 and -180 <= lon2 <= 180):
+    if not (
+        -90 <= lat1 <= 90
+        and -90 <= lat2 <= 90
+        and -180 <= lon1 <= 180
+        and -180 <= lon2 <= 180
+    ):
         raise ValueError('Coordonnées hors limites.')
 
-    a1, a2 = map(math.radians, (lat1, lat2))
-    dlat, dlon = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    a1, a2 = map(
+        math.radians,
+        (lat1, lat2),
+    )
 
-    a = math.sin(dlat / 2) ** 2 + math.cos(a1) * math.cos(a2) * math.sin(dlon / 2) ** 2
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
 
-    return 6371 * 2 * math.asin(math.sqrt(min(1, max(0, a))))
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(a1)
+        * math.cos(a2)
+        * math.sin(dlon / 2) ** 2
+    )
+
+    return (
+        6371
+        * 2
+        * math.asin(
+            math.sqrt(min(1, max(0, a)))
+        )
+    )
 
 
-def matcher_acquereur(acquereur, annonce, latitude_reference=None, longitude_reference=None):
+def matcher_acquereur(
+    acquereur,
+    annonce,
+    latitude_reference=None,
+    longitude_reference=None,
+):
     details = []
 
-    def ajouter(critere, valeur, conforme, imperatif, message):
-        statut = (
-            'a_verifier' if valeur is None else
-            'correspondance' if conforme else
-            'ecarte' if imperatif else
-            'preference_non_satisfaite'
-        )
+    def ajouter(
+        critere,
+        valeur,
+        conforme,
+        imperatif,
+        message,
+    ):
+        if valeur is None:
+            statut = 'a_verifier'
+        elif conforme:
+            statut = 'correspondance'
+        elif imperatif:
+            statut = 'ecarte'
+        else:
+            statut = 'preference_non_satisfaite'
 
         details.append(
-            dict(
-                critere=critere,
-                statut=statut,
-                message=message,
-                imperatif=imperatif
-            )
+            {
+                'critere': critere,
+                'statut': statut,
+                'message': message,
+                'imperatif': imperatif,
+            }
         )
 
     types = [
-        k for k in ('maison', 'pavillon', 'maison_pierre', 'appartement')
-        if acquereur.get('recherche_' + k)
+        key
+        for key in (
+            'maison',
+            'pavillon',
+            'maison_pierre',
+            'appartement',
+        )
+        if acquereur.get('recherche_' + key)
     ]
 
-    categorie = normaliser_texte(annonce.get('type_maison'))
+    categorie = normaliser_texte(
+        annonce.get('type_maison')
+    )
 
     if not types:
-        ajouter('type', None, False, True, 'Type recherché non renseigné.')
+        ajouter(
+            'type',
+            None,
+            False,
+            True,
+            'Type recherché non renseigné.',
+        )
 
     elif not categorie:
-        ajouter('type', None, False, True, 'Type du bien à vérifier.')
+        ajouter(
+            'type',
+            None,
+            False,
+            True,
+            'Type du bien à vérifier.',
+        )
 
     else:
-        # Le matériau est comparé séparément ; un pavillon appartient aux maisons.
-        maison = categorie in ('maison', 'pavillon', 'maison_pierre')
+        # Le matériau est comparé séparément.
+        # Un pavillon appartient à la catégorie des maisons.
+        maison = categorie in (
+            'maison',
+            'pavillon',
+            'maison_pierre',
+        )
 
         ok = (
             ('maison' in types and maison)
@@ -71,16 +146,32 @@ def matcher_acquereur(acquereur, annonce, latitude_reference=None, longitude_ref
             or categorie in types
         )
 
-        ajouter('type', categorie, ok, True, f'Type déclaré : {categorie}.')
+        ajouter(
+            'type',
+            categorie,
+            ok,
+            True,
+            f'Type déclaré : {categorie}.',
+        )
 
     budget = acquereur.get('budget_max')
 
     if budget is None or budget <= 0:
-        ajouter('budget', None, False, True, 'Budget acquéreur non renseigné.')
+        ajouter(
+            'budget',
+            None,
+            False,
+            True,
+            'Budget acquéreur non renseigné.',
+        )
 
     else:
         marge = acquereur.get('marge_budget')
-        limite = budget + (0 if marge is None else marge)
+
+        limite = budget + (
+            0 if marge is None else marge
+        )
+
         prix = annonce.get('prix')
 
         ajouter(
@@ -88,15 +179,43 @@ def matcher_acquereur(acquereur, annonce, latitude_reference=None, longitude_ref
             prix,
             prix is not None and prix <= limite,
             True,
-            f'Prix : {prix if prix is not None else "inconnu"} € ; plafond avec marge : {limite:g} €.'
+            (
+                f'Prix : {prix if prix is not None else "inconnu"} € ; '
+                f'plafond avec marge : {limite:g} €.'
+            ),
         )
 
     for achat, bien, critere, obligatoire in (
-        ('chambres_min', 'chambres', 'chambres', True),
-        ('chambres_rdc_min', 'chambres_rdc', 'chambres_rdc', True),
-        ('salles_eau_min', 'salles_eau', 'salles_eau', True),
-        ('surface_habitable_min', 'surface_habitable', 'surface_habitable', True),
-        ('surface_terrain_souhaitee', 'surface_terrain', 'terrain', False),
+        (
+            'chambres_min',
+            'chambres',
+            'chambres',
+            True,
+        ),
+        (
+            'chambres_rdc_min',
+            'chambres_rdc',
+            'chambres_rdc',
+            True,
+        ),
+        (
+            'salles_eau_min',
+            'salles_eau',
+            'salles_eau',
+            True,
+        ),
+        (
+            'surface_habitable_min',
+            'surface_habitable',
+            'surface_habitable',
+            True,
+        ),
+        (
+            'surface_terrain_souhaitee',
+            'surface_terrain',
+            'terrain',
+            False,
+        ),
     ):
         minimum = acquereur.get(achat)
 
@@ -108,58 +227,109 @@ def matcher_acquereur(acquereur, annonce, latitude_reference=None, longitude_ref
                 valeur,
                 valeur is not None and valeur >= minimum,
                 obligatoire,
-                f'Valeur : {valeur if valeur is not None else "inconnue"} ; minimum : {minimum:g}.'
+                (
+                    f'Valeur : '
+                    f'{valeur if valeur is not None else "inconnue"} ; '
+                    f'minimum : {minimum:g}.'
+                ),
             )
 
     for achat, bien, obligatoire in (
-        ('plain_pied_obligatoire', 'plain_pied', True),
-        ('garage_obligatoire', 'garage', True),
-        ('salle_eau_rdc', 'salle_eau_rdc', True),
-        ('sous_sol_recherche', 'sous_sol', False),
-        ('recherche_maison_pierre', 'maison_pierre', False),
+        (
+            'plain_pied_obligatoire',
+            'plain_pied',
+            True,
+        ),
+        (
+            'garage_obligatoire',
+            'garage',
+            True,
+        ),
+        (
+            'salle_eau_rdc',
+            'salle_eau_rdc',
+            True,
+        ),
+        (
+            'salle_bain_rdc',
+            'salle_bain_rdc',
+            True,
+        ),
+        (
+            'sous_sol_recherche',
+            'sous_sol',
+            False,
+        ),
+        (
+            'recherche_maison_pierre',
+            'maison_pierre',
+            False,
+        ),
     ):
         if acquereur.get(achat):
             valeur = annonce.get(bien)
+
+            if valeur is None:
+                message = 'Information inconnue.'
+            elif valeur:
+                message = 'Présence confirmée.'
+            else:
+                message = 'Absence confirmée.'
 
             ajouter(
                 bien,
                 valeur,
                 valeur is True,
                 obligatoire,
-                'Information inconnue.' if valeur is None else
-                'Présence confirmée.' if valeur else
-                'Absence confirmée.'
+                message,
             )
 
     rayon = acquereur.get('rayon_km')
     secteur = acquereur.get('secteur')
 
     if rayon is not None and rayon > 0:
-        lat = acquereur.get('latitude_reference', latitude_reference)
-        lon = acquereur.get('longitude_reference', longitude_reference)
+        lat = acquereur.get(
+            'latitude_reference',
+            latitude_reference,
+        )
+
+        lon = acquereur.get(
+            'longitude_reference',
+            longitude_reference,
+        )
 
         distance = calculer_distance_km(
             lat,
             lon,
             annonce.get('latitude'),
-            annonce.get('longitude')
+            annonce.get('longitude'),
         )
+
+        if distance is None:
+            message = (
+                'Coordonnées de référence ou du bien manquantes.'
+            )
+        else:
+            message = (
+                f'Distance à vol d’oiseau : {distance:.1f} km ; '
+                f'rayon : {rayon:g} km.'
+            )
 
         ajouter(
             'localisation',
             distance,
             distance is not None and distance <= rayon,
             True,
-            'Coordonnées de référence ou du bien manquantes.' if distance is None else
-            f'Distance à vol d’oiseau : {distance:.1f} km ; rayon : {rayon:g} km.'
+            message,
         )
 
     elif secteur:
-        # Sans rayon, le secteur représente une liste explicite de communes.
+        # Sans rayon, le secteur représente
+        # une liste explicite de communes.
         communes = {
-            normaliser_texte(x)
-            for x in secteur.replace(';', ',').split(',')
-            if x.strip()
+            normaliser_texte(commune)
+            for commune in secteur.replace(';', ',').split(',')
+            if commune.strip()
         }
 
         commune = annonce.get('commune')
@@ -169,7 +339,10 @@ def matcher_acquereur(acquereur, annonce, latitude_reference=None, longitude_ref
             commune or None,
             normaliser_texte(commune) in communes,
             True,
-            f'Commune : {commune or "inconnue"} ; communes demandées : {secteur}.'
+            (
+                f'Commune : {commune or "inconnue"} ; '
+                f'communes demandées : {secteur}.'
+            ),
         )
 
     else:
@@ -178,45 +351,62 @@ def matcher_acquereur(acquereur, annonce, latitude_reference=None, longitude_ref
             None,
             False,
             True,
-            'Secteur acquéreur non renseigné.'
+            'Secteur acquéreur non renseigné.',
         )
 
-    statuts = [d['statut'] for d in details]
+    statuts = [
+        detail['statut']
+        for detail in details
+    ]
 
-    statut = (
-        'ecarte' if 'ecarte' in statuts else
-        'a_verifier' if 'a_verifier' in statuts else
-        'preference_non_satisfaite' if 'preference_non_satisfaite' in statuts else
-        'correspondance'
+    if 'ecarte' in statuts:
+        statut = 'ecarte'
+    elif 'a_verifier' in statuts:
+        statut = 'a_verifier'
+    elif 'preference_non_satisfaite' in statuts:
+        statut = 'preference_non_satisfaite'
+    else:
+        statut = 'correspondance'
+
+    connus = sum(
+        valeur != 'a_verifier'
+        for valeur in statuts
     )
 
-    connus = sum(s != 'a_verifier' for s in statuts)
     conformes = statuts.count('correspondance')
 
-    return dict(
-        statut_matching=statut,
-        score=round(100 * conformes / connus) if connus else None,
-        couverture=round(100 * connus / len(details)) if details else 0,
-        details_matching=details
-    )
+    return {
+        'statut_matching': statut,
+        'score': (
+            round(100 * conformes / connus)
+            if connus
+            else None
+        ),
+        'couverture': (
+            round(100 * connus / len(details))
+            if details
+            else 0
+        ),
+        'details_matching': details,
+    }
 
 
 def matcher_tous_les_acquereurs(
     acquereurs,
     annonce,
     latitude_reference=None,
-    longitude_reference=None
+    longitude_reference=None,
 ):
     return [
         dict(
-            acquereur=a,
+            acquereur=acquereur,
             **matcher_acquereur(
-                a,
+                acquereur,
                 annonce,
                 latitude_reference,
-                longitude_reference
-            )
+                longitude_reference,
+            ),
         )
-        for a in acquereurs
-        if a.get('actif', True)
+        for acquereur in acquereurs
+        if acquereur.get('actif', True)
     ]
