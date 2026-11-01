@@ -82,11 +82,14 @@ def preparer_formulaire(data, selection):
         'recherche_maison', 'recherche_pavillon',
         'recherche_maison_pierre', 'recherche_appartement',
         'plain_pied_obligatoire', 'garage_obligatoire',
-        'salle_eau_rdc', 'sous_sol_recherche',
+        'salle_eau_rdc', 'salle_bain_rdc', 'sous_sol_recherche',
     ):
         valeur = data.get(champ)
 
-        if champ == 'salle_eau_rdc' and selection[0] == 'Annonces':
+        if (
+            champ in ('salle_eau_rdc', 'salle_bain_rdc')
+            and selection[0] == 'Annonces'
+        ):
             st.session_state[cle_champ(champ)] = (
                 valeur if isinstance(valeur, bool) else None
             )
@@ -220,6 +223,7 @@ def formulaire_acquereur(data):
             ('plain_pied_obligatoire', 'Plain-pied obligatoire'),
             ('garage_obligatoire', 'Garage obligatoire'),
             ('salle_eau_rdc', 'Salle d’eau au RDC obligatoire'),
+            ('salle_bain_rdc', 'Salle de bains au RDC obligatoire'),
             ('sous_sol_recherche', 'Sous-sol souhaité'),
         ]:
             result[key] = st.checkbox(
@@ -330,12 +334,18 @@ def formulaire_annonce(data):
             ('chambres_rdc', 'Chambres au RDC'),
             ('salles_eau', 'Salles d’eau'),
         ]:
-            result[key] = nombre(label, key, data, entier=True)
+            result[key] = nombre(
+                label,
+                key,
+                data,
+                entier=True,
+            )
 
         for key, label in [
             ('plain_pied', 'Plain-pied'),
             ('garage', 'Garage'),
             ('salle_eau_rdc', 'Salle d’eau au RDC'),
+            ('salle_bain_rdc', 'Salle de bains au RDC'),
             ('sous_sol', 'Sous-sol'),
             ('maison_pierre', 'Construction en pierre'),
         ]:
@@ -405,13 +415,55 @@ def editeur(db, acheteurs=False):
     preparer_formulaire(data, (titre, identifiant))
 
     if not acheteurs and data:
+        trace = data.get('extraction_criteres') or {}
+
+        if trace:
+            with st.expander(
+                'Informations extraites du descriptif Bien’ici'
+            ):
+                st.caption(
+                    'Les extraits justifient l’analyse automatique. '
+                    'Vos valeurs déjà renseignées sont conservées. '
+                    'Les critères sans mention explicite restent inconnus.'
+                )
+
+                noms = {
+                    'chambres': 'Chambres',
+                    'chambres_rdc': 'Chambres au RDC',
+                    'garage': 'Garage',
+                    'plain_pied': 'Plain-pied',
+                    'salle_eau_rdc': 'Salle d’eau au RDC',
+                    'salle_bain_rdc': 'Salle de bains au RDC',
+                }
+
+                for champ, preuves in trace.get('preuves', {}).items():
+                    for preuve in preuves:
+                        valeur = preuve.get('valeur')
+
+                        if valeur is None:
+                            affiche = 'À vérifier'
+                        elif valeur is True:
+                            affiche = 'Oui'
+                        elif valeur is False:
+                            affiche = 'Non'
+                        else:
+                            affiche = str(valeur)
+
+                        st.write(
+                            noms.get(champ, champ) + ' : ' + affiche
+                        )
+
+                        st.caption(preuve.get('extrait') or '')
+
         if data.get('url'):
             try:
                 adresse = normaliser_url(data['url'])
+
                 st.link_button(
                     'Ouvrir l’annonce sur le site',
                     adresse,
                 )
+
             except ValueError:
                 st.warning(
                     'Cette fiche contient une ancienne URL invalide. '
@@ -429,6 +481,7 @@ def editeur(db, acheteurs=False):
                         {'statut_annonce': 'archivee'},
                         data['id'],
                     )
+
                 except Exception:
                     erreur('Archivage impossible.')
                     return
@@ -459,9 +512,11 @@ def editeur(db, acheteurs=False):
                     st.error(
                         'Cochez la confirmation pour supprimer cette annonce.'
                     )
+
                 else:
                     try:
                         db.supprimer_annonce(data['id'])
+
                     except Exception:
                         erreur('Suppression impossible.')
                         return
@@ -483,7 +538,10 @@ def editeur(db, acheteurs=False):
         return
 
     try:
-        result = valider(result, acquereur=acheteurs)
+        result = valider(
+            result,
+            acquereur=acheteurs,
+        )
 
         if not acheteurs and result.get('prix') == 0:
             raise ValueError(
@@ -526,9 +584,15 @@ def editeur(db, acheteurs=False):
 
     try:
         if acheteurs:
-            count = recalculer(db, acquereurs=[saved])
+            count = recalculer(
+                db,
+                acquereurs=[saved],
+            )
         else:
-            count = recalculer(db, annonces=[saved])
+            count = recalculer(
+                db,
+                annonces=[saved],
+            )
 
         st.success(
             f'{count} comparaison(s) actualisée(s). '
@@ -557,7 +621,11 @@ def import_alertes(db, source='bienici'):
         extraire_liens_bienici,
         liens_non_resolus,
     )
-    from services import importer_emails
+
+    from services import (
+        importer_emails,
+        completer_biens_bienici,
+    )
 
     if source == 'leboncoin':
         from leboncoin_import import (
@@ -578,8 +646,62 @@ def import_alertes(db, source='bienici'):
     st.info(
         'Les informations écrites dans les alertes sont récupérées : '
         'lien, titre, prix, commune et surfaces lorsqu’ils sont présents. '
-        'Les autres critères restent à compléter dans Annonces.'
+        'Les caractéristiques non précisées restent inconnues.'
     )
+
+    if source == 'bienici':
+        st.info(
+            'Le descriptif complet Bien’ici est aussi analysé pour '
+            'compléter les chambres, les chambres au RDC, le garage, '
+            'le plain-pied et la salle de bains ou d’eau au RDC. '
+            'Les valeurs déjà renseignées sont conservées. '
+            'Les mentions absentes ou ambiguës restent inconnues.'
+        )
+
+        st.caption(
+            'Jusqu’à 20 descriptifs sont lus par import. '
+            'Pour les annonces déjà enregistrées ou une lecture '
+            'à reprendre, utilisez le bouton ci-dessous.'
+        )
+
+        if st.button(
+            'Compléter les annonces Bien’ici déjà enregistrées'
+        ):
+            try:
+                with st.spinner(
+                    'Lecture des descriptifs Bien’ici…'
+                ):
+                    resultat = completer_biens_bienici(db)
+
+                st.success(
+                    f'{resultat["analyses"]} descriptif(s) analysé(s), '
+                    'matching actualisé.'
+                )
+
+                if resultat['erreurs']:
+                    st.warning(
+                        f'{resultat["erreurs"]} descriptif(s) '
+                        'inaccessible(s). Les fiches sont conservées '
+                        'et pourront être reprises.'
+                    )
+
+                if resultat['restants']:
+                    st.info(
+                        f'{resultat["restants"]} fiche(s) '
+                        'supplémentaire(s) à traiter : '
+                        'cliquez à nouveau sur ce bouton.'
+                    )
+
+                st.session_state.pop(
+                    'selection_formulaire_v2',
+                    None,
+                )
+
+            except Exception:
+                erreur(
+                    'Complément des critères interrompu. '
+                    'Les fiches déjà enregistrées sont conservées.'
+                )
 
     limite = st.number_input(
         'Nombre des derniers e-mails à examiner',
@@ -602,7 +724,9 @@ def import_alertes(db, source='bienici'):
         key='lire_' + source,
     ):
         try:
-            with st.spinner('Lecture des alertes ' + nom + '…'):
+            with st.spinner(
+                'Lecture des alertes ' + nom + '…'
+            ):
                 st.session_state[cle_apercu] = get_emails_alertes(
                     int(limite),
                     source=source,
@@ -616,7 +740,9 @@ def import_alertes(db, source='bienici'):
                     )
 
         except Exception:
-            erreur('Impossible de lire les e-mails ' + nom + '.')
+            erreur(
+                'Impossible de lire les e-mails ' + nom + '.'
+            )
 
     items = st.session_state.get(cle_apercu, [])
 
@@ -627,19 +753,27 @@ def import_alertes(db, source='bienici'):
             + (item.get('html_body') or '')
         )
 
-        with st.expander(item.get('subject') or 'Alerte sans objet'):
+        with st.expander(
+            item.get('subject') or 'Alerte sans objet'
+        ):
             st.write(item.get('date') or '')
 
             liens = extraire_liens(texte)
 
             for url in liens:
-                st.link_button('Ouvrir l’annonce', url)
+                st.link_button(
+                    'Ouvrir l’annonce',
+                    url,
+                )
 
             if source == 'leboncoin':
                 non_resolus = liens_leboncoin_non_resolus(item)
                 annoncees = nombre_annoncees_leboncoin(item)
 
-                if annoncees is not None and annoncees > len(liens):
+                if (
+                    annoncees is not None
+                    and annoncees > len(liens)
+                ):
                     st.caption(
                         f'Le sujet annonce {annoncees} biens ; '
                         f'cet e-mail contient {len(liens)} lien(s) '
@@ -652,9 +786,9 @@ def import_alertes(db, source='bienici'):
 
             if non_resolus:
                 st.warning(
-                    f'{len(non_resolus)} lien(s) d’annonce non reconnu(s). '
-                    'Un exemple d’e-mail peut être nécessaire '
-                    'pour adapter l’extracteur.'
+                    f'{len(non_resolus)} lien(s) d’annonce '
+                    'non reconnu(s). Un exemple d’e-mail peut être '
+                    'nécessaire pour adapter l’extracteur.'
                 )
 
     if items and st.button(
@@ -668,6 +802,7 @@ def import_alertes(db, source='bienici'):
                     db,
                     items,
                     source=source,
+                    enrichir=(source == 'bienici'),
                 )
 
             st.success(
@@ -676,6 +811,26 @@ def import_alertes(db, source='bienici'):
                 f'{bilan["enrichis"]} fiche(s) complétée(s), '
                 f'{bilan["deja_traites"]} e-mail(s) déjà traité(s).'
             )
+
+            if source == 'bienici':
+                st.info(
+                    f'{bilan.get("criteres_lus", 0)} '
+                    'descriptif(s) complet(s) analysé(s).'
+                )
+
+                if (
+                    bilan.get('criteres_erreurs')
+                    or bilan.get('criteres_reportes')
+                ):
+                    st.warning(
+                        f'{bilan.get("criteres_erreurs", 0)} '
+                        'lecture(s) impossible(s), '
+                        f'{bilan.get("criteres_reportes", 0)} '
+                        'analyse(s) reportée(s). '
+                        'Utilisez « Compléter les annonces Bien’ici '
+                        'déjà enregistrées » pour reprendre. '
+                        'L’import des liens est conservé.'
+                    )
 
             if bilan['non_resolus'] or bilan['sans_annonce']:
                 st.warning(
@@ -688,8 +843,9 @@ def import_alertes(db, source='bienici'):
             st.caption(
                 'Les données absentes restent inconnues. '
                 'Un nombre de pièces ne renseigne pas les chambres. '
-                'Une absence de mention Pro ne confirme pas un particulier. '
-                'Vérifiez les fiches avant de proposer un bien.'
+                'Une absence de mention Pro ne confirme pas '
+                'un particulier. Vérifiez les fiches avant '
+                'de proposer un bien.'
             )
 
         except Exception:
@@ -709,7 +865,9 @@ def page_matching(db):
             with st.spinner('Recalcul…'):
                 count = recalculer(db)
 
-            st.success(f'{count} comparaison(s) actualisée(s).')
+            st.success(
+                f'{count} comparaison(s) actualisée(s).'
+            )
 
         except Exception:
             erreur(
@@ -751,7 +909,8 @@ def page_matching(db):
     )
 
     matches = [
-        m for m in db.get_matches()
+        m
+        for m in db.get_matches()
         if str(m['acquereur_id']) in acheteurs
         and str(m['annonce_id']) in biens
     ]
@@ -774,7 +933,8 @@ def page_matching(db):
         b = biens[bid]
 
         if (
-            selection != 'Tous' and aid != selection
+            selection != 'Tous'
+            and aid != selection
         ) or (
             statut_filtre != 'Tous'
             and m['statut_matching'] != statut_filtre
@@ -816,7 +976,8 @@ def page_matching(db):
             st.caption(
                 'Ces pourcentages ne représentent pas '
                 'une probabilité d’achat. Le statut tient compte '
-                'des incompatibilités impératives et des données manquantes.'
+                'des incompatibilités impératives '
+                'et des données manquantes.'
             )
 
             if b.get('url'):
@@ -847,7 +1008,10 @@ def page_matching(db):
                 statut = st.selectbox(
                     'Suivi commercial',
                     suivi,
-                    index=choisir(suivi, m.get('statut')),
+                    index=choisir(
+                        suivi,
+                        m.get('statut'),
+                    ),
                 )
 
                 commentaire = st.text_area(
@@ -855,7 +1019,9 @@ def page_matching(db):
                     value=m.get('commentaire') or '',
                 )
 
-                if st.form_submit_button('Enregistrer le suivi'):
+                if st.form_submit_button(
+                    'Enregistrer le suivi'
+                ):
                     try:
                         db.enregistrer(
                             'matches',
@@ -924,7 +1090,10 @@ def main(default='Tableau de bord'):
             import_bienici(db)
 
         elif page == 'Import Leboncoin':
-            import_alertes(db, source='leboncoin')
+            import_alertes(
+                db,
+                source='leboncoin',
+            )
 
         elif page == 'Matching':
             page_matching(db)
@@ -938,11 +1107,19 @@ def main(default='Tableau de bord'):
             acheteurs = db.get_acquereurs()
             biens = db.get_annonces(actives=True)
 
-            aids = {str(a['id']) for a in acheteurs}
-            bids = {str(b['id']) for b in biens}
+            aids = {
+                str(a['id'])
+                for a in acheteurs
+            }
+
+            bids = {
+                str(b['id'])
+                for b in biens
+            }
 
             matches = [
-                m for m in db.get_matches()
+                m
+                for m in db.get_matches()
                 if str(m['acquereur_id']) in aids
                 and str(m['annonce_id']) in bids
             ]
@@ -980,7 +1157,9 @@ def main(default='Tableau de bord'):
                     bien.get('titre') or 'Annonce à compléter'
                 )
 
-                commune = bien.get('commune') or 'Commune inconnue'
+                commune = (
+                    bien.get('commune') or 'Commune inconnue'
+                )
 
                 prix = (
                     bien.get('prix')
