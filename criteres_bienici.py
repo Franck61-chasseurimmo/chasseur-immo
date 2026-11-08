@@ -1,4 +1,4 @@
-"""Compléter les critères depuis les données publiques de la seule annonce Bien’ici."""
+"""Lecture Bien’ici et règles communes d’extraction des critères immobiliers."""
 
 import json
 import re
@@ -72,9 +72,12 @@ def texte_description(value):
 
 def _normaliser(texte):
     texte = ''.join(
-        c
-        for c in unicodedata.normalize('NFKD', texte.lower())
-        if not unicodedata.combining(c)
+        caractere
+        for caractere in unicodedata.normalize(
+            'NFKD',
+            texte.lower(),
+        )
+        if not unicodedata.combining(caractere)
     )
 
     return re.sub(
@@ -99,7 +102,6 @@ def charger_annonce_bienici(url):
             'Identifiant Bien’ici non reconnu.'
         )
 
-    # Même ressource JSON que celle appelée par la page publique Bien’ici.
     endpoint = (
         'https://www.bienici.com/realEstateAd.json?id='
         + quote(identifiant, safe='')
@@ -239,15 +241,13 @@ def _compter(texte):
         return 0
 
     valeurs = [
-        int(m.group(1))
-        if m.group(1).isdigit()
-        else NOMBRES[m.group(1)]
-        for m in CHAMBRE.finditer(texte)
+        int(match.group(1))
+        if match.group(1).isdigit()
+        else NOMBRES[match.group(1)]
+        for match in CHAMBRE.finditer(texte)
     ]
 
-    # Plusieurs groupes peuvent se recouper :
-    # « 3 chambres dont une... ».
-    # Ne pas les additionner ou choisir arbitrairement un nombre.
+    # Ne pas additionner des groupes qui peuvent se recouper.
     if (
         len(valeurs) == 1
         and len(re.findall(r'\bchambres?\b', texte)) == 1
@@ -329,8 +329,45 @@ def analyser_criteres(donnees):
                     phrase,
                 )
 
-    # Une place de parking ou un carport n’est pas un garage.
+    # Reconnaître un espace nuit décrit après le niveau.
+    # Une autre mention de chambre pourrait correspondre
+    # à un autre niveau : dans ce cas, ne pas déduire le total.
+    if (
+        not preuves['chambres']
+        and len(re.findall(r'\bchambres?\b', texte)) == 1
+    ):
+        for phrase in re.split(r'[.!?;]\s+', texte):
+            espace_nuit = re.search(
+                r"\b(?:espace|partie|coin)\s+nuit\s+"
+                r"(?:se compose de|comprend|comporte|offre|dispose de)\s+",
+                phrase,
+            )
+
+            if espace_nuit and CHAMBRE.search(phrase):
+                ajouter(
+                    'chambres',
+                    _compter(phrase),
+                    phrase,
+                )
+
     for phrase in re.split(r'[.!?;]\s+', texte):
+        # Une surface habitable répartie sur plusieurs niveaux
+        # ne correspond pas à un bien entièrement de plain-pied.
+        if (
+            not HYPOTHESE.search(phrase)
+            and re.search(
+                r'\bsurface\s+habitable\b.{0,100}'
+                r'\breparti(?:es|e|s)?\s+sur\s+'
+                r'(?:deux|2|trois|3)\s+niveaux\b',
+                phrase,
+            )
+        ):
+            ajouter(
+                'plain_pied',
+                False,
+                phrase,
+            )
+
         if re.search(r'\bgarage\b', phrase):
             negatif = re.search(
                 r"\b(?:sans|aucun|pas de|absence de)"
@@ -373,8 +410,7 @@ def analyser_criteres(donnees):
             ):
                 ajouter('plain_pied', True, phrase)
 
-    # Un niveau reste actif jusqu’au niveau suivant.
-    # Une omission ne confirme pas une absence.
+    # Repérer les caractéristiques explicitement situées au RDC.
     niveaux = list(NIVEAU.finditer(texte))
     segments_rdc = []
 
@@ -405,8 +441,6 @@ def analyser_criteres(donnees):
             and segment.strip()
             and not re.search(r'[.;!?:]\s*$', segment)
         ):
-            # « Une chambre à l’étage » ne doit pas
-            # être attribuée au RDC.
             coupures = list(
                 re.finditer(r'[.;!?]\s+', segment)
             )
@@ -514,7 +548,7 @@ def analyser_criteres(donnees):
                 r'salle\s+de\s+bains?|sdb',
             ),
         ):
-            m = re.search(
+            match = re.search(
                 r'\b(?:'
                 + motif
                 + r')\s+(?:situee\s+)?au\s+'
@@ -523,9 +557,9 @@ def analyser_criteres(donnees):
                 phrase,
             )
 
-            if m:
+            if match:
                 avant = phrase[
-                    max(0, m.start() - 25):m.start()
+                    max(0, match.start() - 25):match.start()
                 ]
 
                 absent = bool(
@@ -546,8 +580,8 @@ def analyser_criteres(donnees):
 
     for champ, observations in preuves.items():
         valeurs = {
-            p['valeur']
-            for p in observations
+            preuve['valeur']
+            for preuve in observations
         }
 
         if len(valeurs) == 1:
