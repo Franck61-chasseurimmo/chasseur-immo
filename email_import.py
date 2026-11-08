@@ -33,11 +33,13 @@ def get_yahoo_connection():
             st.secrets["YAHOO_EMAIL"],
             st.secrets["YAHOO_APP_PASSWORD"],
         )
+
     except Exception:
         try:
             mail.logout()
         except Exception:
             pass
+
         raise
 
     return mail
@@ -53,6 +55,7 @@ def decode_email_subject(subject):
                     charset or "utf-8",
                     errors="replace",
                 )
+
             except LookupError:
                 value = value.decode(
                     "utf-8",
@@ -103,6 +106,7 @@ def get_email_body(message):
                 part.get_content_charset() or "utf-8",
                 errors="replace",
             )
+
         except LookupError:
             value = payload.decode(
                 "utf-8",
@@ -121,6 +125,7 @@ def get_emails_alertes(limit=100, source="bienici"):
     domaines = {
         "bienici": "bienici.com",
         "leboncoin": "leboncoin.fr",
+        "seloger": "seloger.com",
     }
 
     if source not in domaines:
@@ -313,8 +318,8 @@ def extraire_url_bienici(url):
         ):
             return None
 
-        # Les paramètres d’alerte et le jeton du destinataire
-        # ne sont pas nécessaires pour ouvrir l’annonce.
+        # Retirer les paramètres d’alerte
+        # et le jeton personnel du destinataire.
         return urlunsplit(
             (
                 "https",
@@ -464,7 +469,7 @@ def extraire_annonces_bienici(email_data):
             " ".join(morceaux),
         )
 
-    # La version texte des alertes place généralement
+    # La version texte place généralement
     # [URL] après son libellé.
     precedent = 0
 
@@ -476,6 +481,7 @@ def extraire_annonces_bienici(email_data):
             match.group(1),
             texte[precedent:match.start()][-500:],
         )
+
         precedent = match.end()
 
     for url in extraire_liens_bienici(texte):
