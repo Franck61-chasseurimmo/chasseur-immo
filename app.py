@@ -21,6 +21,7 @@ CHOIX = [
     'Annonces',
     'Import Bien’ici',
     'Import Leboncoin',
+    'Import SeLoger',
     'Matching',
     'Diagnostic Yahoo',
 ]
@@ -462,30 +463,49 @@ def editeur(db, acheteurs=False):
 
     if not acheteurs and data:
         from leboncoin_import import extraire_url_leboncoin
+        from seloger_import import extraire_url_seloger
 
-        if extraire_url_leboncoin(data.get('url')):
+        if extraire_url_seloger(data.get('url')):
+            source_texte = 'seloger'
+        elif extraire_url_leboncoin(data.get('url')):
+            source_texte = 'leboncoin'
+        else:
+            source_texte = None
+
+        if source_texte:
+            nom_texte = (
+                'SeLoger'
+                if source_texte == 'seloger'
+                else 'Leboncoin'
+            )
+
             with st.expander(
-                'Compléter les critères depuis le descriptif Leboncoin',
+                'Compléter les critères depuis le descriptif '
+                + nom_texte,
                 expanded=True,
             ):
                 st.caption(
-                    'Ouvrez cette annonce sur Leboncoin, copiez '
-                    'uniquement son descriptif, puis collez-le ici. '
-                    'Le bouton enregistre le texte, complète les '
-                    'critères inconnus et recalcule le matching. '
-                    'Les valeurs déjà renseignées sont conservées ; '
-                    'les informations ambiguës restent à vérifier.'
+                    'Ouvrez cette annonce sur ' + nom_texte
+                    + ', copiez uniquement son descriptif, puis '
+                    'collez-le ici. Le bouton enregistre le texte, '
+                    'complète les critères inconnus et recalcule '
+                    'le matching. Les valeurs déjà renseignées '
+                    'sont conservées ; les informations ambiguës '
+                    'restent à vérifier.'
                 )
 
                 with st.form(
-                    'analyse_leboncoin_' + str(data['id'])
+                    'analyse_' + source_texte + '_' + str(data['id'])
                 ):
                     texte_colle = st.text_area(
                         'Descriptif complet à analyser',
                         value=data.get('description') or '',
                         height=220,
                         max_chars=100000,
-                        key='texte_leboncoin_' + str(data['id']),
+                        key=(
+                            'texte_' + source_texte
+                            + '_' + str(data['id'])
+                        ),
                     )
 
                     analyser = st.form_submit_button(
@@ -497,6 +517,16 @@ def editeur(db, acheteurs=False):
                     from criteres_leboncoin import (
                         completer_depuis_description,
                     )
+
+                    if source_texte == 'seloger':
+                        from seloger_import import (
+                            completer_description_seloger,
+                        )
+
+                        completer_depuis_description = (
+                            completer_description_seloger
+                        )
+
                     from services import recalculer
 
                     try:
@@ -526,7 +556,7 @@ def editeur(db, acheteurs=False):
 
                         except Exception:
                             LOGGER.exception(
-                                'Descriptif Leboncoin enregistré, '
+                                'Descriptif enregistré, '
                                 'matching incomplet.'
                             )
                             matching_ok = False
@@ -554,7 +584,8 @@ def editeur(db, acheteurs=False):
                 st.caption(
                     'Les extraits justifient l’analyse automatique. '
                     'Vos valeurs déjà renseignées sont conservées. '
-                    'Les critères sans mention explicite restent inconnus.'
+                    'Les critères sans mention explicite '
+                    'restent inconnus.'
                 )
 
                 noms = {
@@ -770,6 +801,7 @@ def import_alertes(db, source='bienici'):
     from services import (
         importer_emails,
         completer_biens_bienici,
+        completer_biens_seloger,
     )
 
     if source == 'leboncoin':
@@ -781,6 +813,16 @@ def import_alertes(db, source='bienici'):
 
         nom = 'Leboncoin'
         extraire_liens = extraire_liens_leboncoin
+
+    elif source == 'seloger':
+        from seloger_import import (
+            preparer_emails_seloger,
+            extraire_annonces_seloger,
+            liens_seloger_non_resolus,
+        )
+
+        nom = 'SeLoger'
+        extraire_liens = None
 
     else:
         nom = 'Bien’ici'
@@ -794,9 +836,10 @@ def import_alertes(db, source='bienici'):
         'Les caractéristiques non précisées restent inconnues.'
     )
 
-    if source == 'bienici':
+    if source in ('bienici', 'seloger'):
         st.info(
-            'Le descriptif complet Bien’ici est aussi analysé pour '
+            'Le descriptif complet ' + nom
+            + ' est aussi analysé lorsqu’il est accessible, pour '
             'compléter les chambres, les chambres au RDC, le garage, '
             'le plain-pied et la salle de bains ou d’eau au RDC. '
             'Les valeurs déjà renseignées sont conservées. '
@@ -810,13 +853,16 @@ def import_alertes(db, source='bienici'):
         )
 
         if st.button(
-            'Compléter les annonces Bien’ici déjà enregistrées'
+            'Compléter les annonces ' + nom + ' déjà enregistrées'
         ):
             try:
                 with st.spinner(
-                    'Lecture des descriptifs Bien’ici…'
+                    'Lecture des descriptifs ' + nom + '…'
                 ):
-                    resultat = completer_biens_bienici(db)
+                    if source == 'seloger':
+                        resultat = completer_biens_seloger(db)
+                    else:
+                        resultat = completer_biens_bienici(db)
 
                 st.success(
                     f'{resultat["analyses"]} descriptif(s) analysé(s), '
@@ -864,6 +910,17 @@ def import_alertes(db, source='bienici'):
 
     cle_apercu = 'emails_preview_' + source
 
+    if source == 'seloger':
+        st.caption(
+            'La lecture résout uniquement les boutons d’annonces '
+            'SeLoger, jusqu’à 20 nouveaux liens par clic. '
+            'SeLoger peut comptabiliser ces ouvertures. '
+            'Les liens de gestion et de désabonnement sont ignorés. '
+            'En cas de liens non résolus, relancez la lecture ; '
+            'les destinations déjà trouvées sont réutilisées '
+            'pendant cette session.'
+        )
+
     if st.button(
         'Lire les alertes Yahoo',
         key='lire_' + source,
@@ -876,6 +933,22 @@ def import_alertes(db, source='bienici'):
                     int(limite),
                     source=source,
                 )
+
+                if source == 'seloger':
+                    cache = st.session_state.setdefault(
+                        'seloger_resolutions',
+                        {},
+                    )
+
+                    if len(cache) > 1000:
+                        cache.clear()
+
+                    st.session_state[cle_apercu] = (
+                        preparer_emails_seloger(
+                            st.session_state[cle_apercu],
+                            cache=cache,
+                        )
+                    )
 
                 if not st.session_state[cle_apercu]:
                     st.info(
@@ -908,7 +981,13 @@ def import_alertes(db, source='bienici'):
                 item.get('date') or ''
             )
 
-            liens = extraire_liens(texte)
+            if source == 'seloger':
+                liens = [
+                    bien['url']
+                    for bien in extraire_annonces_seloger(item)
+                ]
+            else:
+                liens = extraire_liens(texte)
 
             for url in liens:
                 st.link_button(
@@ -931,6 +1010,9 @@ def import_alertes(db, source='bienici'):
                         'dans le message seront importés.'
                     )
 
+            elif source == 'seloger':
+                non_resolus = liens_seloger_non_resolus(item)
+
             else:
                 non_resolus = liens_non_resolus(texte)
 
@@ -952,7 +1034,9 @@ def import_alertes(db, source='bienici'):
                     db,
                     items,
                     source=source,
-                    enrichir=(source == 'bienici'),
+                    enrichir=(
+                        source in ('bienici', 'seloger')
+                    ),
                 )
 
             st.success(
@@ -962,7 +1046,7 @@ def import_alertes(db, source='bienici'):
                 f'{bilan["deja_traites"]} e-mail(s) déjà traité(s).'
             )
 
-            if source == 'bienici':
+            if source in ('bienici', 'seloger'):
                 st.info(
                     f'{bilan.get("criteres_lus", 0)} '
                     'descriptif(s) complet(s) analysé(s).'
@@ -977,8 +1061,9 @@ def import_alertes(db, source='bienici'):
                         'lecture(s) impossible(s), '
                         f'{bilan.get("criteres_reportes", 0)} '
                         'analyse(s) reportée(s). '
-                        'Utilisez « Compléter les annonces Bien’ici '
-                        'déjà enregistrées » pour reprendre. '
+                        'Utilisez « Compléter les annonces '
+                        + nom
+                        + ' déjà enregistrées » pour reprendre. '
                         'L’import des liens est conservé.'
                     )
 
@@ -1061,62 +1146,63 @@ def page_matching(db):
     )
 
     matches = [
-        m
-        for m in db.get_matches()
-        if str(m['acquereur_id']) in acheteurs
-        and str(m['annonce_id']) in biens
+        match
+        for match in db.get_matches()
+        if str(match['acquereur_id']) in acheteurs
+        and str(match['annonce_id']) in biens
     ]
 
     matches.sort(
-        key=lambda m: (
-            m.get('couverture') or 0,
-            m.get('score') or 0,
+        key=lambda match: (
+            match.get('couverture') or 0,
+            match.get('score') or 0,
         ),
         reverse=True,
     )
 
     visibles = 0
 
-    for m in matches:
-        aid = str(m['acquereur_id'])
-        bid = str(m['annonce_id'])
+    for match in matches:
+        aid = str(match['acquereur_id'])
+        bid = str(match['annonce_id'])
 
-        a = acheteurs[aid]
-        b = biens[bid]
+        acquereur = acheteurs[aid]
+        bien = biens[bid]
 
         if (
             selection != 'Tous'
             and aid != selection
         ) or (
             statut_filtre != 'Tous'
-            and m['statut_matching'] != statut_filtre
+            and match['statut_matching'] != statut_filtre
         ):
             continue
 
         if (
             vendeur != 'Tous'
-            and (b.get('type_annonceur') or 'inconnu') != vendeur
+            and (bien.get('type_annonceur') or 'inconnu') != vendeur
         ):
             continue
 
         visibles += 1
 
         titre = (
-            f'{STATUTS.get(m["statut_matching"], m["statut_matching"])}'
-            f' · {a.get("prenom", "")} {a.get("nom", "")}'
-            f' · {b.get("titre") or b.get("url")}'
+            f'{STATUTS.get(match["statut_matching"], match["statut_matching"])}'
+            f' · {acquereur.get("prenom", "")} '
+            f'{acquereur.get("nom", "")}'
+            f' · {bien.get("titre") or bien.get("url")}'
         )
 
         with st.expander(titre):
             score_affiche = (
                 'non calculable'
-                if m.get('score') is None
-                else f'{m["score"]} %'
+                if match.get('score') is None
+                else f'{match["score"]} %'
             )
 
             couverture = (
-                m.get('couverture')
-                if m.get('couverture') is not None
+                match.get('couverture')
+                if match.get('couverture') is not None
                 else 'à recalculer'
             )
 
@@ -1132,16 +1218,16 @@ def page_matching(db):
                 'et des données manquantes.'
             )
 
-            if b.get('url'):
+            if bien.get('url'):
                 st.link_button(
                     'Voir le bien',
-                    b['url'],
+                    bien['url'],
                 )
 
-            for d in m.get('details_matching') or []:
+            for detail in match.get('details_matching') or []:
                 st.write(
-                    f'{STATUTS.get(d["statut"], d["statut"])} '
-                    f'— {d["critere"]} : {d["message"]}'
+                    f'{STATUTS.get(detail["statut"], detail["statut"])} '
+                    f'— {detail["critere"]} : {detail["message"]}'
                 )
 
             suivi = [
@@ -1153,27 +1239,27 @@ def page_matching(db):
                 'clos',
             ]
 
-            if m.get('statut') and m['statut'] not in suivi:
+            if match.get('statut') and match['statut'] not in suivi:
                 suivi.insert(
                     0,
-                    m['statut'],
+                    match['statut'],
                 )
 
             with st.form(
-                'suivi_' + str(m['id'])
+                'suivi_' + str(match['id'])
             ):
                 statut = st.selectbox(
                     'Suivi commercial',
                     suivi,
                     index=choisir(
                         suivi,
-                        m.get('statut'),
+                        match.get('statut'),
                     ),
                 )
 
                 commentaire = st.text_area(
                     'Commentaire',
-                    value=m.get('commentaire') or '',
+                    value=match.get('commentaire') or '',
                 )
 
                 if st.form_submit_button(
@@ -1186,7 +1272,7 @@ def page_matching(db):
                                 'statut': statut,
                                 'commentaire': commentaire,
                             },
-                            m['id'],
+                            match['id'],
                         )
 
                         st.success(
@@ -1269,6 +1355,12 @@ def main(default='Tableau de bord'):
                 source='leboncoin',
             )
 
+        elif page == 'Import SeLoger':
+            import_alertes(
+                db,
+                source='seloger',
+            )
+
         elif page == 'Matching':
             page_matching(db)
 
@@ -1284,20 +1376,20 @@ def main(default='Tableau de bord'):
             biens = db.get_annonces(actives=True)
 
             aids = {
-                str(a['id'])
-                for a in acheteurs
+                str(acquereur['id'])
+                for acquereur in acheteurs
             }
 
             bids = {
-                str(b['id'])
-                for b in biens
+                str(bien['id'])
+                for bien in biens
             }
 
             matches = [
-                m
-                for m in db.get_matches()
-                if str(m['acquereur_id']) in aids
-                and str(m['annonce_id']) in bids
+                match
+                for match in db.get_matches()
+                if str(match['acquereur_id']) in aids
+                and str(match['annonce_id']) in bids
             ]
 
             cols = st.columns(3)
@@ -1315,8 +1407,8 @@ def main(default='Tableau de bord'):
             cols[2].metric(
                 'Correspondances confirmées',
                 sum(
-                    m['statut_matching'] == 'correspondance'
-                    for m in matches
+                    match['statut_matching'] == 'correspondance'
+                    for match in matches
                 ),
             )
 
@@ -1326,7 +1418,7 @@ def main(default='Tableau de bord'):
 
             dernieres = sorted(
                 biens,
-                key=lambda b: b.get('imported_at') or '',
+                key=lambda bien: bien.get('imported_at') or '',
                 reverse=True,
             )[:10]
 
