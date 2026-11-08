@@ -71,6 +71,16 @@ def importer_emails(
         normaliser = extraire_url_leboncoin
         prefixe = 'leboncoin-v1:'
 
+    elif source == 'seloger':
+        from seloger_import import (
+            extraire_annonces_seloger,
+            extraire_url_seloger,
+        )
+
+        extraire = extraire_annonces_seloger
+        normaliser = extraire_url_seloger
+        prefixe = 'seloger-v1:'
+
     else:
         raise ValueError('Source d’alertes inconnue.')
 
@@ -94,7 +104,9 @@ def importer_emails(
     # Retrouver les annonces de cette source,
     # y compris les anciennes URL de suivi.
     for bien in db.get_annonces():
-        canonique = normaliser(bien.get('url'))
+        canonique = normaliser(
+            bien.get('url')
+        )
 
         if canonique and (
             canonique not in index
@@ -124,6 +136,13 @@ def importer_emails(
             )
 
             non_resolus = liens_leboncoin_non_resolus(item)
+
+        elif source == 'seloger':
+            from seloger_import import (
+                liens_seloger_non_resolus,
+            )
+
+            non_resolus = liens_seloger_non_resolus(item)
 
         else:
             non_resolus = liens_non_resolus(texte)
@@ -195,7 +214,7 @@ def importer_emails(
             # ne sont pas écrasées.
             if (
                 enrichir
-                and source == 'bienici'
+                and source in ('bienici', 'seloger')
                 and bien.get(
                     'statut_annonce',
                     'disponible',
@@ -207,9 +226,25 @@ def importer_emails(
                     VERSION,
                 )
 
+                if source == 'seloger':
+                    from seloger_import import (
+                        completer_annonce_seloger,
+                        VERSION,
+                    )
+
+                    completer_annonce = completer_annonce_seloger
+
+                trace = bien.get('extraction_criteres') or {}
+
                 deja_analysee = (
-                    bien.get('extraction_criteres') or {}
-                ).get('version') == VERSION
+                    trace.get('version') == VERSION
+                    and (
+                        source != 'seloger'
+                        or str(
+                            trace.get('source', '')
+                        ).startswith('SeLoger')
+                    )
+                )
 
                 if (
                     not deja_analysee
@@ -252,7 +287,7 @@ def importer_emails(
 
 
 def completer_biens_bienici(db, limite=20):
-    """Reprendre les fiches déjà importées."""
+    """Reprendre les fiches Bien’ici déjà importées."""
 
     from criteres_bienici import (
         completer_annonce,
@@ -287,6 +322,62 @@ def completer_biens_bienici(db, limite=20):
     for bien in candidats[:limite]:
         try:
             bien, lu = completer_annonce(
+                db,
+                bien,
+            )
+
+        except LectureImpossible:
+            bilan['erreurs'] += 1
+            continue
+
+        bilan['analyses'] += int(lu)
+
+        recalculer(
+            db,
+            acquereurs=acheteurs,
+            annonces=[bien],
+        )
+
+    return bilan
+
+
+def completer_biens_seloger(db, limite=20):
+    """Reprendre les fiches SeLoger déjà importées."""
+
+    from seloger_import import (
+        completer_annonce_seloger,
+        extraire_url_seloger,
+        VERSION,
+        LectureImpossible,
+    )
+
+    acheteurs = db.get_acquereurs()
+
+    candidats = [
+        bien
+        for bien in db.get_annonces(actives=True)
+        if extraire_url_seloger(bien.get('url'))
+        and bien.get(
+            'statut_annonce',
+            'disponible',
+        ) == 'disponible'
+        and (
+            bien.get('extraction_criteres') or {}
+        ).get('version') != VERSION
+    ]
+
+    bilan = {
+        'analyses': 0,
+        'erreurs': 0,
+        'restants': max(
+            0,
+            len(candidats) - limite,
+        ),
+    }
+
+    for bien in candidats[:limite]:
+        try:
+            bien, lu = completer_annonce_seloger(
                 db,
                 bien,
             )
