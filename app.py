@@ -74,8 +74,10 @@ def preparer_formulaire(data, selection):
 
     for champ in entiers + decimaux:
         valeur = data.get(champ)
+
         if valeur is not None:
             valeur = int(valeur) if champ in entiers else float(valeur)
+
         st.session_state[cle_champ(champ)] = valeur
 
     for champ in (
@@ -100,6 +102,7 @@ def preparer_formulaire(data, selection):
 
     for champ in ('plain_pied', 'garage', 'sous_sol', 'maison_pierre'):
         valeur = data.get(champ)
+
         st.session_state[cle_champ(champ)] = (
             valeur if isinstance(valeur, bool) else None
         )
@@ -121,6 +124,7 @@ def preparer_formulaire(data, selection):
 
     for champ, options in choix.items():
         valeur = data.get(champ)
+
         st.session_state[cle_champ(champ)] = (
             valeur if valeur in options else options[0]
         )
@@ -145,6 +149,7 @@ def coordonnees(data, reference=False):
         ('longitude', 'Longitude', 180.0),
     ]:
         champ = key + suffixe
+
         values[champ] = st.number_input(
             label,
             min_value=-limite,
@@ -382,14 +387,55 @@ def editeur(db, acheteurs=False):
     titre = 'Acquéreurs' if acheteurs else 'Annonces'
     st.title(titre)
 
+    if not acheteurs:
+        retour = st.session_state.pop(
+            'retour_analyse_leboncoin',
+            None,
+        )
+
+        if retour:
+            st.success(
+                f'Descriptif enregistré : {retour["nombre"]} '
+                'critère(s) complété(s).'
+            )
+
+            if retour['conserves']:
+                st.info(
+                    'Certaines valeurs déjà renseignées diffèrent '
+                    'du texte : elles ont été conservées. '
+                    'Vérifiez les extraits et corrigez la fiche '
+                    'si nécessaire.'
+                )
+
+            if retour['nombre'] == 0:
+                st.info(
+                    'Aucun nouveau critère rempli : les valeurs '
+                    'sont déjà renseignées ou le texte ne permet '
+                    'pas de les déterminer avec certitude.'
+                )
+
+            if retour['matching']:
+                st.success('Matching actualisé.')
+            else:
+                st.warning(
+                    'Le descriptif et les critères sont enregistrés, '
+                    'mais le matching est incomplet. '
+                    'Utilisez « Recalculer tous les matches » '
+                    'dans Matching.'
+                )
+
     if not acheteurs and st.session_state.pop('annonce_supprimee', None):
         st.session_state.pop('selecteur_Annonces', None)
         st.session_state.pop('selection_formulaire_v2', None)
+
         st.success(
             'Annonce et correspondances liées supprimées définitivement.'
         )
 
-    by_id = {str(x['id']): x for x in rows}
+    by_id = {
+        str(x['id']): x
+        for x in rows
+    }
 
     def libelle(key):
         if key == '__nouveau__':
@@ -415,11 +461,95 @@ def editeur(db, acheteurs=False):
     preparer_formulaire(data, (titre, identifiant))
 
     if not acheteurs and data:
+        from leboncoin_import import extraire_url_leboncoin
+
+        if extraire_url_leboncoin(data.get('url')):
+            with st.expander(
+                'Compléter les critères depuis le descriptif Leboncoin',
+                expanded=True,
+            ):
+                st.caption(
+                    'Ouvrez cette annonce sur Leboncoin, copiez '
+                    'uniquement son descriptif, puis collez-le ici. '
+                    'Le bouton enregistre le texte, complète les '
+                    'critères inconnus et recalcule le matching. '
+                    'Les valeurs déjà renseignées sont conservées ; '
+                    'les informations ambiguës restent à vérifier.'
+                )
+
+                with st.form(
+                    'analyse_leboncoin_' + str(data['id'])
+                ):
+                    texte_colle = st.text_area(
+                        'Descriptif complet à analyser',
+                        value=data.get('description') or '',
+                        height=220,
+                        max_chars=100000,
+                        key='texte_leboncoin_' + str(data['id']),
+                    )
+
+                    analyser = st.form_submit_button(
+                        'Analyser et compléter',
+                        type='primary',
+                    )
+
+                if analyser:
+                    from criteres_leboncoin import (
+                        completer_depuis_description,
+                    )
+                    from services import recalculer
+
+                    try:
+                        resultat = completer_depuis_description(
+                            db,
+                            data,
+                            texte_colle,
+                        )
+
+                    except ValueError as exc:
+                        st.error(str(exc))
+
+                    except Exception:
+                        erreur(
+                            'Analyse ou enregistrement du descriptif '
+                            'impossible.'
+                        )
+
+                    else:
+                        matching_ok = True
+
+                        try:
+                            recalculer(
+                                db,
+                                annonces=[resultat['bien']],
+                            )
+
+                        except Exception:
+                            LOGGER.exception(
+                                'Descriptif Leboncoin enregistré, '
+                                'matching incomplet.'
+                            )
+                            matching_ok = False
+
+                        st.session_state['retour_analyse_leboncoin'] = {
+                            'nombre': len(resultat['completes']),
+                            'conserves': bool(resultat['conserves']),
+                            'matching': matching_ok,
+                        }
+
+                        st.session_state.pop(
+                            'selection_formulaire_v2',
+                            None,
+                        )
+
+                        st.rerun()
+
         trace = data.get('extraction_criteres') or {}
 
         if trace:
             with st.expander(
-                'Informations extraites du descriptif Bien’ici'
+                'Informations extraites du descriptif '
+                + str(trace.get('source') or 'Bien’ici')
             ):
                 st.caption(
                     'Les extraits justifient l’analyse automatique. '
@@ -453,7 +583,9 @@ def editeur(db, acheteurs=False):
                             noms.get(champ, champ) + ' : ' + affiche
                         )
 
-                        st.caption(preuve.get('extrait') or '')
+                        st.caption(
+                            preuve.get('extrait') or ''
+                        )
 
         if data.get('url'):
             try:
@@ -486,10 +618,16 @@ def editeur(db, acheteurs=False):
                     erreur('Archivage impossible.')
                     return
 
-                st.session_state.pop('selection_formulaire_v2', None)
+                st.session_state.pop(
+                    'selection_formulaire_v2',
+                    None,
+                )
+
                 st.rerun()
 
-        with st.expander('Supprimer définitivement cette annonce'):
+        with st.expander(
+            'Supprimer définitivement cette annonce'
+        ):
             st.warning(
                 'Cette action efface cette annonce et toutes ses '
                 'correspondances, y compris leur suivi commercial. '
@@ -497,7 +635,9 @@ def editeur(db, acheteurs=False):
                 'L’annonce reste publiée sur son site d’origine.'
             )
 
-            with st.form('suppression_' + str(data['id'])):
+            with st.form(
+                'suppression_' + str(data['id'])
+            ):
                 confirme = st.checkbox(
                     'Je confirme la suppression définitive de cette annonce',
                     key='confirmer_suppression_' + str(data['id']),
@@ -556,7 +696,9 @@ def editeur(db, acheteurs=False):
             )
 
         if not acheteurs:
-            existante = db.get_annonce_by_url(result['url'])
+            existante = db.get_annonce_by_url(
+                result['url']
+            )
 
             if existante and str(existante['id']) != identifiant:
                 raise ValueError(
@@ -612,7 +754,10 @@ def editeur(db, acheteurs=False):
 
 
 def import_bienici(db):
-    import_alertes(db, source='bienici')
+    import_alertes(
+        db,
+        source='bienici',
+    )
 
 
 def import_alertes(db, source='bienici'):
@@ -744,7 +889,10 @@ def import_alertes(db, source='bienici'):
                 'Impossible de lire les e-mails ' + nom + '.'
             )
 
-    items = st.session_state.get(cle_apercu, [])
+    items = st.session_state.get(
+        cle_apercu,
+        [],
+    )
 
     for item in items:
         texte = (
@@ -756,7 +904,9 @@ def import_alertes(db, source='bienici'):
         with st.expander(
             item.get('subject') or 'Alerte sans objet'
         ):
-            st.write(item.get('date') or '')
+            st.write(
+                item.get('date') or ''
+            )
 
             liens = extraire_liens(texte)
 
@@ -860,7 +1010,9 @@ def page_matching(db):
 
     st.title('Matching')
 
-    if st.button('Recalculer tous les matches'):
+    if st.button(
+        'Recalculer tous les matches'
+    ):
         try:
             with st.spinner('Recalcul…'):
                 count = recalculer(db)
@@ -1002,9 +1154,14 @@ def page_matching(db):
             ]
 
             if m.get('statut') and m['statut'] not in suivi:
-                suivi.insert(0, m['statut'])
+                suivi.insert(
+                    0,
+                    m['statut'],
+                )
 
-            with st.form('suivi_' + str(m['id'])):
+            with st.form(
+                'suivi_' + str(m['id'])
+            ):
                 statut = st.selectbox(
                     'Suivi commercial',
                     suivi,
@@ -1032,10 +1189,14 @@ def page_matching(db):
                             m['id'],
                         )
 
-                        st.success('Suivi enregistré.')
+                        st.success(
+                            'Suivi enregistré.'
+                        )
 
                     except Exception:
-                        erreur('Suivi non enregistré.')
+                        erreur(
+                            'Suivi non enregistré.'
+                        )
 
     if not visibles:
         st.info(
@@ -1047,13 +1208,18 @@ def page_matching(db):
 def diagnostic_yahoo():
     st.title('Diagnostic Yahoo')
 
-    if st.button('Tester la connexion Yahoo'):
+    if st.button(
+        'Tester la connexion Yahoo'
+    ):
         from email_import import get_yahoo_connection
 
         try:
             mail = get_yahoo_connection()
             mail.logout()
-            st.success('Connexion Yahoo réussie.')
+
+            st.success(
+                'Connexion Yahoo réussie.'
+            )
 
         except Exception:
             erreur(
@@ -1069,19 +1235,27 @@ def main(default='Tableau de bord'):
         layout='wide',
     )
 
-    st.sidebar.title('🏡 Chasseur Immo')
+    st.sidebar.title(
+        '🏡 Chasseur Immo'
+    )
 
     page = st.sidebar.radio(
         'Navigation',
         CHOIX,
-        index=choisir(CHOIX, default),
+        index=choisir(
+            CHOIX,
+            default,
+        ),
     )
 
     import database as db
 
     try:
         if page == 'Acquéreurs':
-            editeur(db, acheteurs=True)
+            editeur(
+                db,
+                acheteurs=True,
+            )
 
         elif page == 'Annonces':
             editeur(db)
@@ -1102,7 +1276,9 @@ def main(default='Tableau de bord'):
             diagnostic_yahoo()
 
         else:
-            st.title('Tableau de bord')
+            st.title(
+                'Tableau de bord'
+            )
 
             acheteurs = db.get_acquereurs()
             biens = db.get_annonces(actives=True)
@@ -1144,7 +1320,9 @@ def main(default='Tableau de bord'):
                 ),
             )
 
-            st.write('Dernières annonces disponibles')
+            st.write(
+                'Dernières annonces disponibles'
+            )
 
             dernieres = sorted(
                 biens,
@@ -1167,7 +1345,9 @@ def main(default='Tableau de bord'):
                     else 'Prix inconnu'
                 )
 
-                st.write(f'{commune} · {prix}')
+                st.write(
+                    f'{commune} · {prix}'
+                )
 
                 if bien.get('url'):
                     st.link_button(
