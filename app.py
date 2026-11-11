@@ -99,7 +99,7 @@ def formulaire_acquereur(data):
         for key, label in [('prenom', 'Prénom *'), ('nom', 'Nom *'), ('telephone', 'Téléphone'),
                            ('email', 'E-mail'), ('secteur', 'Commune(s) recherchée(s), séparées par des virgules')]:
             result[key] = st.text_input(label, key=cle_champ(key)).strip()
-        st.caption('Sans rayon : la commune doit appartenir à cette liste. Avec rayon : utilisez le centre GPS ci-dessous. Un secteur vague reste à préciser.')
+        st.caption('Sans rayon : indiquez les communes acceptées. Avec rayon : indiquez une seule commune de départ, par exemple Alençon (61). Son centre sera utilisé automatiquement ; vous pouvez aussi préciser un point GPS ci-dessous.')
         for key, label in [('budget_max', 'Budget maximum hors frais d’acquisition (€)'),
                            ('marge_budget', 'Marge budgétaire autorisée (€ ; vide = 0)'), ('rayon_km', 'Rayon à vol d’oiseau (km)')]:
             result[key] = nombre(label, key, data)
@@ -144,7 +144,7 @@ def formulaire_annonce(data):
                            ('salle_bain_rdc', 'Salle de bains au RDC'),
                            ('sous_sol', 'Sous-sol'), ('maison_pierre', 'Construction en pierre')]:
             result[key] = trois_etats(label, key, data)
-        st.caption('Laissez « Inconnu » lorsque l’annonce ne précise pas une caractéristique. Les champs numériques peuvent rester vides ; 0 signifie une valeur réellement connue.')
+        st.caption('Laissez « Inconnu » lorsque l’annonce ne précise pas une caractéristique. Les champs numériques peuvent rester vides ; 0 signifie une valeur réellement connue. Sans coordonnées GPS, la commune est localisée au recalcul ; en cas d’homonyme, précisez le département, par exemple Pacé (61).')
         result.update(coordonnees(data))
         result['description'] = st.text_area('Description (non interprétée automatiquement)', key=cle_champ('description'))
         submitted = st.form_submit_button('Enregistrer et recalculer', type='primary')
@@ -449,6 +449,7 @@ def import_alertes(db, source='bienici'):
 def page_matching(db):
     from services import recalculer
     st.title('Matching')
+    st.caption('Avec un rayon, les communes sont localisées automatiquement si les coordonnées GPS manquent. Le départ est le centre de la commune recherchée. La distance au centre de la commune du bien est indicative : si son étendue peut franchir la limite, le résultat reste à vérifier. Seuls les noms des communes sont transmis au service public geo.api.gouv.fr. Après un changement de commune, relancez le recalcul.')
     if st.button('Recalculer tous les matches'):
         try:
             with st.spinner('Recalcul…'):
