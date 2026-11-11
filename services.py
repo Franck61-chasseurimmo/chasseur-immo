@@ -6,6 +6,8 @@ from email_import import extraire_annonces_bienici, extraire_url_bienici, liens_
 def recalculer(db, acquereurs=None, annonces=None):
     acheteurs = db.get_acquereurs() if acquereurs is None else acquereurs
     biens = db.get_annonces(actives=True) if annonces is None else annonces
+    from geolocalisation import preparer_localisations
+    acheteurs, biens = preparer_localisations(acheteurs, biens)
     nombre = 0
     for bien in biens:
         if bien.get('statut_annonce', 'disponible') != 'disponible':
@@ -14,7 +16,11 @@ def recalculer(db, acquereurs=None, annonces=None):
             if not acheteur.get('actif', True):
                 continue
             resultat = matcher_acquereur(acheteur, bien)
-            db.insert_match(dict(acquereur_id=acheteur['id'], annonce_id=bien['id'], **resultat))
+            db.insert_match(dict(
+                acquereur_id=acheteur['id'],
+                annonce_id=bien['id'],
+                **resultat
+            ))
             nombre += 1
     return nombre
 
@@ -41,25 +47,43 @@ def importer_emails(db, emails, source='bienici', enrichir=False):
         prefixe = 'figaro-v1:'
     else:
         raise ValueError('Source d’alertes inconnue.')
-    bilan = dict(messages=0, nouveaux=0, existants=0, enrichis=0,
-                 deja_traites=0, non_resolus=0, sans_annonce=0)
+
+    bilan = dict(
+        messages=0,
+        nouveaux=0,
+        existants=0,
+        enrichis=0,
+        deja_traites=0,
+        non_resolus=0,
+        sans_annonce=0,
+    )
     bilan.update(criteres_lus=0, criteres_erreurs=0, criteres_reportes=0)
     tentatives = set()
     acheteurs = db.get_acquereurs()
     index = {}
+
     # Retrouver les annonces de cette source, y compris les anciennes URL de suivi.
     for bien in db.get_annonces():
         canonique = normaliser(bien.get('url'))
-        if canonique and (canonique not in index or bien.get('url') == canonique):
+        if canonique and (
+            canonique not in index or bien.get('url') == canonique
+        ):
             index[canonique] = bien
+
     for item in emails:
         # Reprendre les anciens messages une fois avec le nouvel extracteur.
         cle = prefixe + item['cle']
         if db.email_traite(cle):
             bilan['deja_traites'] += 1
             continue
-        texte = (item.get('html_body') or '') + '\n' + (item.get('text_body') or '')
+
+        texte = (
+            (item.get('html_body') or '')
+            + '\n'
+            + (item.get('text_body') or '')
+        )
         annonces = extraire(item)
+
         if source == 'leboncoin':
             from leboncoin_import import liens_leboncoin_non_resolus
             non_resolus = liens_leboncoin_non_resolus(item)
@@ -71,12 +95,15 @@ def importer_emails(db, emails, source='bienici', enrichir=False):
             non_resolus = liens_figaro_non_resolus(item)
         else:
             non_resolus = liens_non_resolus(texte)
+
         bilan['non_resolus'] += len(non_resolus)
         if not annonces:
             bilan['sans_annonce'] += 1
+
         for annonce in annonces:
             url = annonce['url']
             ancienne = index.get(url) or db.get_annonce_by_url(url)
+
             if ancienne:
                 bien = ancienne
                 bilan['existants'] += 1
@@ -86,8 +113,12 @@ def importer_emails(db, emails, source='bienici', enrichir=False):
                 donnees['statut_annonce'] = 'disponible'
                 bien = db.insert_annonce(donnees)
                 bilan['nouveaux'] += 1
+
             if not bien:
-                raise RuntimeError('Annonce non enregistrée ; message non marqué traité.')
+                raise RuntimeError(
+                    'Annonce non enregistrée ; message non marqué traité.'
+                )
+
             changements = {}
             for champ, valeur in annonce.items():
                 actuel = bien.get(champ)
@@ -96,24 +127,43 @@ def importer_emails(db, emails, source='bienici', enrichir=False):
                     manque = True
                 if valeur is not None and manque:
                     changements[champ] = valeur
+
             if bien.get('url') != url:
                 changements['url'] = url
+
             if changements:
                 bien = db.enregistrer('annonces', changements, bien['id'])
                 if ancienne:
                     bilan['enrichis'] += 1
+
             # Les valeurs connues, y compris zéro et False, ne sont pas écrasées.
-            if enrichir and source in ('bienici', 'seloger', 'figaro') and bien.get('statut_annonce', 'disponible') == 'disponible':
+            if (
+                enrichir
+                and source in ('bienici', 'seloger', 'figaro')
+                and bien.get('statut_annonce', 'disponible') == 'disponible'
+            ):
                 from criteres_bienici import completer_annonce, LectureImpossible, VERSION
+
                 if source == 'seloger':
                     from seloger_import import completer_annonce_seloger, VERSION
                     completer_annonce = completer_annonce_seloger
                 elif source == 'figaro':
                     from figaro_import import completer_annonce_figaro, VERSION
                     completer_annonce = completer_annonce_figaro
+
                 trace = bien.get('extraction_criteres') or {}
-                nom_trace = {'seloger': 'SeLoger', 'figaro': 'Figaro Immobilier'}.get(source)
-                deja_analysee = trace.get('version') == VERSION and (not nom_trace or str(trace.get('source', '')).startswith(nom_trace))
+                nom_trace = {
+                    'seloger': 'SeLoger',
+                    'figaro': 'Figaro Immobilier',
+                }.get(source)
+                deja_analysee = (
+                    trace.get('version') == VERSION
+                    and (
+                        not nom_trace
+                        or str(trace.get('source', '')).startswith(nom_trace)
+                    )
+                )
+
                 if not deja_analysee and url not in tentatives:
                     if len(tentatives) >= 20:
                         bilan['criteres_reportes'] += 1
@@ -125,26 +175,39 @@ def importer_emails(db, emails, source='bienici', enrichir=False):
                         except LectureImpossible as exc:
                             bilan['criteres_erreurs'] += 1
                             if source == 'figaro':
-                                messages = bilan.setdefault('criteres_messages', [])
+                                messages = bilan.setdefault(
+                                    'criteres_messages', []
+                                )
                                 if str(exc) not in messages:
                                     messages.append(str(exc))
+
             index[url] = bien
             recalculer(db, acquereurs=acheteurs, annonces=[bien])
+
         if annonces and not non_resolus:
             db.marquer_email(cle, len(annonces))
         bilan['messages'] += 1
+
     return bilan
 
 
 def completer_biens_bienici(db, limite=20):
     """Reprendre les fiches déjà importées, sans dépendre des e-mails traités."""
     from criteres_bienici import completer_annonce, LectureImpossible, VERSION
+
     acheteurs = db.get_acquereurs()
-    candidats = [bien for bien in db.get_annonces(actives=True)
-                 if extraire_url_bienici(bien.get('url'))
-                 and bien.get('statut_annonce', 'disponible') == 'disponible'
-                 and (bien.get('extraction_criteres') or {}).get('version') != VERSION]
-    bilan = {'analyses': 0, 'erreurs': 0, 'restants': max(0, len(candidats) - limite)}
+    candidats = [
+        bien for bien in db.get_annonces(actives=True)
+        if extraire_url_bienici(bien.get('url'))
+        and bien.get('statut_annonce', 'disponible') == 'disponible'
+        and (bien.get('extraction_criteres') or {}).get('version') != VERSION
+    ]
+    bilan = {
+        'analyses': 0,
+        'erreurs': 0,
+        'restants': max(0, len(candidats) - limite),
+    }
+
     for bien in candidats[:limite]:
         try:
             bien, lu = completer_annonce(db, bien)
@@ -153,17 +216,31 @@ def completer_biens_bienici(db, limite=20):
             continue
         bilan['analyses'] += int(lu)
         recalculer(db, acquereurs=acheteurs, annonces=[bien])
+
     return bilan
 
 
 def completer_biens_seloger(db, limite=20):
-    from seloger_import import completer_annonce_seloger, extraire_url_seloger, VERSION, LectureImpossible
+    from seloger_import import (
+        completer_annonce_seloger,
+        extraire_url_seloger,
+        VERSION,
+        LectureImpossible,
+    )
+
     acheteurs = db.get_acquereurs()
-    candidats = [bien for bien in db.get_annonces(actives=True)
-                 if extraire_url_seloger(bien.get('url'))
-                 and bien.get('statut_annonce', 'disponible') == 'disponible'
-                 and (bien.get('extraction_criteres') or {}).get('version') != VERSION]
-    bilan = {'analyses': 0, 'erreurs': 0, 'restants': max(0, len(candidats) - limite)}
+    candidats = [
+        bien for bien in db.get_annonces(actives=True)
+        if extraire_url_seloger(bien.get('url'))
+        and bien.get('statut_annonce', 'disponible') == 'disponible'
+        and (bien.get('extraction_criteres') or {}).get('version') != VERSION
+    ]
+    bilan = {
+        'analyses': 0,
+        'erreurs': 0,
+        'restants': max(0, len(candidats) - limite),
+    }
+
     for bien in candidats[:limite]:
         try:
             bien, lu = completer_annonce_seloger(db, bien)
@@ -172,17 +249,32 @@ def completer_biens_seloger(db, limite=20):
             continue
         bilan['analyses'] += int(lu)
         recalculer(db, acquereurs=acheteurs, annonces=[bien])
+
     return bilan
 
 
 def completer_biens_figaro(db, limite=20):
-    from figaro_import import completer_annonce_figaro, extraire_url_figaro, VERSION, LectureImpossible
+    from figaro_import import (
+        completer_annonce_figaro,
+        extraire_url_figaro,
+        VERSION,
+        LectureImpossible,
+    )
+
     acheteurs = db.get_acquereurs()
-    candidats = [bien for bien in db.get_annonces(actives=True)
-                 if extraire_url_figaro(bien.get('url'))
-                 and bien.get('statut_annonce', 'disponible') == 'disponible'
-                 and (bien.get('extraction_criteres') or {}).get('version') != VERSION]
-    bilan = {'analyses': 0, 'erreurs': 0, 'restants': max(0, len(candidats) - limite), 'motifs': []}
+    candidats = [
+        bien for bien in db.get_annonces(actives=True)
+        if extraire_url_figaro(bien.get('url'))
+        and bien.get('statut_annonce', 'disponible') == 'disponible'
+        and (bien.get('extraction_criteres') or {}).get('version') != VERSION
+    ]
+    bilan = {
+        'analyses': 0,
+        'erreurs': 0,
+        'restants': max(0, len(candidats) - limite),
+        'motifs': [],
+    }
+
     for bien in candidats[:limite]:
         try:
             bien, lu = completer_annonce_figaro(db, bien)
@@ -193,4 +285,5 @@ def completer_biens_figaro(db, limite=20):
             continue
         bilan['analyses'] += int(lu)
         recalculer(db, acquereurs=acheteurs, annonces=[bien])
+
     return bilan
