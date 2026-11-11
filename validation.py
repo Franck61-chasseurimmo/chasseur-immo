@@ -6,7 +6,6 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 def normaliser_url(value):
     parts = urlsplit((value or '').strip())
-
     if (
         parts.scheme.lower() not in ('http', 'https')
         or not parts.hostname
@@ -32,15 +31,13 @@ def normaliser_url(value):
         and k.lower() not in ('fbclid', 'gclid', 'mc_cid', 'mc_eid')
     ]
 
-    return urlunsplit(
-        (
-            parts.scheme.lower(),
-            netloc,
-            parts.path or '/',
-            urlencode(sorted(params)),
-            ''
-        )
-    )
+    return urlunsplit((
+        parts.scheme.lower(),
+        netloc,
+        parts.path or '/',
+        urlencode(sorted(params)),
+        '',
+    ))
 
 
 def valider(data, acquereur=False):
@@ -51,7 +48,6 @@ def valider(data, acquereur=False):
             raise ValueError(
                 'Type maison en pierre incompatible avec construction en pierre = Non.'
             )
-
         data['maison_pierre'] = True
 
     if acquereur:
@@ -62,11 +58,9 @@ def valider(data, acquereur=False):
             raise ValueError('Nom et prénom obligatoires.')
 
         if data.get('email') and not re.fullmatch(
-            r'[^\s@]+@[^\s@]+\.[^\s@]+',
-            data['email']
+            r'[^\s@]+@[^\s@]+\.[^\s@]+', data['email']
         ):
             raise ValueError('Adresse e-mail invalide.')
-
     else:
         data['url'] = normaliser_url(data.get('url'))
 
@@ -84,29 +78,22 @@ def valider(data, acquereur=False):
         'surface_terrain_souhaitee',
         'surface_habitable',
         'surface_habitable_min',
-        'rayon_km'
+        'rayon_km',
     ):
         value = data.get(key)
-
         if value is not None and (
-            not math.isfinite(float(value))
-            or float(value) < 0
+            not math.isfinite(float(value)) or float(value) < 0
         ):
-            raise ValueError(
-                f'{key} doit être un nombre positif ou nul.'
-            )
+            raise ValueError(f'{key} doit être un nombre positif ou nul.')
 
     for latkey, lonkey in (
         ('latitude', 'longitude'),
-        ('latitude_reference', 'longitude_reference')
+        ('latitude_reference', 'longitude_reference'),
     ):
-        lat = data.get(latkey)
-        lon = data.get(lonkey)
+        lat, lon = data.get(latkey), data.get(lonkey)
 
         if (lat is None) != (lon is None):
-            raise ValueError(
-                'Renseignez ensemble latitude et longitude.'
-            )
+            raise ValueError('Renseignez ensemble latitude et longitude.')
 
         if lat is not None and (
             not math.isfinite(lat)
@@ -118,7 +105,7 @@ def valider(data, acquereur=False):
 
     for child, total in (
         ('chambres_rdc', 'chambres'),
-        ('chambres_rdc_min', 'chambres_min')
+        ('chambres_rdc_min', 'chambres_min'),
     ):
         if (
             data.get(child) is not None
@@ -134,8 +121,14 @@ def valider(data, acquereur=False):
         and data.get('rayon_km')
         and data.get('latitude_reference') is None
     ):
-        raise ValueError(
-            'Un rayon nécessite les coordonnées du centre de recherche.'
-        )
+        from geolocalisation import lire_commune, LocalisationImpossible
+
+        try:
+            lire_commune(data.get('secteur'))
+        except LocalisationImpossible as exc:
+            raise ValueError(
+                'Avec un rayon, indiquez une seule commune de départ précise '
+                'ou ses coordonnées GPS.'
+            ) from exc
 
     return data
