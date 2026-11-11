@@ -68,6 +68,15 @@ def get_email_body(message):
     return '\n'.join(bodies['text/plain']), '\n'.join(bodies['text/html'])
 
 
+def est_alerte_construction_figaro(subject):
+    """Reconnaître un objet dédié aux projets, sans filtrer un e-mail mixte."""
+    objet = re.sub(r'\s+', ' ', decode_email_subject(subject)).strip()
+    return bool(re.search(
+        r'(?:^|:\s*)\d+\s+(?:nouveaux?\s+)?projets?\s+de\s+construction\s+'
+        r'correspond(?:ent)?\s+à\s+votre\s+recherche[.!]?$', objet, re.I
+    ))
+
+
 def get_emails_alertes(limit=100, source='bienici'):
     domaines = {
         'bienici': 'bienici.com',
@@ -106,6 +115,8 @@ def get_emails_alertes(limit=100, source='bienici'):
             sender = message.get('From', '')
             domaine = parseaddr(sender)[1].rsplit('@', 1)[-1].lower()
             if domaine != domaine_attendu and not domaine.endswith('.' + domaine_attendu):
+                continue
+            if source == 'figaro' and est_alerte_construction_figaro(message.get('Subject')):
                 continue
             text, markup = get_email_body(message)
             # Le compte + INBOX + UIDVALIDITY + UID évitent les collisions entre boîtes.
