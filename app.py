@@ -155,6 +155,10 @@ def editeur(db, acheteurs=False):
     rows = db.get_acquereurs(actif=False) if acheteurs else db.get_annonces()
     titre = 'Acquéreurs' if acheteurs else 'Annonces'
     st.title(titre)
+    if acheteurs and st.session_state.pop('acquereur_supprime', None):
+        st.session_state.pop('selecteur_Acquéreurs', None)
+        st.session_state.pop('selection_formulaire_v2', None)
+        st.success('Acquéreur et correspondances liées supprimés définitivement.')
     if not acheteurs:
         retour = st.session_state.pop('retour_analyse_leboncoin', None)
         if retour:
@@ -184,6 +188,30 @@ def editeur(db, acheteurs=False):
                                format_func=libelle, key='selecteur_' + titre)
     data = by_id.get(identifiant, {})
     preparer_formulaire(data, (titre, identifiant))
+    if acheteurs and data:
+        with st.expander('Supprimer définitivement cet acquéreur'):
+            st.warning(
+                'Cette action efface cet acquéreur et toutes ses correspondances, '
+                'y compris leur suivi commercial. Elle est irréversible. '
+                'Les annonces sont conservées.'
+            )
+            with st.form('suppression_acquereur_' + str(data['id'])):
+                confirme = st.checkbox(
+                    'Je confirme la suppression définitive de cet acquéreur',
+                    key='confirmer_suppression_acquereur_' + str(data['id'])
+                )
+                supprimer = st.form_submit_button('Supprimer définitivement cet acquéreur')
+            if supprimer:
+                if not confirme:
+                    st.error('Cochez la confirmation pour supprimer cet acquéreur.')
+                else:
+                    try:
+                        db.supprimer_acquereur(data['id'])
+                    except Exception:
+                        erreur('Suppression de l’acquéreur impossible.')
+                        return
+                    st.session_state['acquereur_supprime'] = str(data['id'])
+                    st.rerun()
     if not acheteurs and data:
         from leboncoin_import import extraire_url_leboncoin
         from seloger_import import extraire_url_seloger
