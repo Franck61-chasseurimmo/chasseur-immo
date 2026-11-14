@@ -1,9 +1,7 @@
 """Lecture Bien’ici et règles communes d’extraction des critères immobiliers."""
-
 import json
 import re
 import unicodedata
-
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
@@ -11,18 +9,11 @@ from urllib.parse import quote, urlsplit
 from urllib.request import Request, HTTPRedirectHandler, build_opener
 
 from email_import import extraire_url_bienici
-
+from extraction_complete import extraire_informations, CHAMPS_COMPLEMENTAIRES
 
 VERSION = 1
-
-CHAMPS = (
-    'chambres',
-    'chambres_rdc',
-    'garage',
-    'plain_pied',
-    'salle_eau_rdc',
-    'salle_bain_rdc',
-)
+CHAMPS = ('chambres', 'chambres_rdc', 'garage', 'plain_pied',
+          'salle_eau_rdc', 'salle_bain_rdc') + CHAMPS_COMPLEMENTAIRES
 
 
 class LectureImpossible(RuntimeError):
@@ -43,14 +34,12 @@ class _Texte(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag in ('script', 'style'):
             self.masque += 1
-
         if tag in ('br', 'p', 'div', 'li'):
             self.morceaux.append('\n')
 
     def handle_endtag(self, tag):
         if tag in ('script', 'style') and self.masque:
             self.masque -= 1
-
         if tag in ('p', 'div', 'li'):
             self.morceaux.append('\n')
 
@@ -62,7 +51,6 @@ class _Texte(HTMLParser):
 def texte_description(value):
     lecteur = _Texte()
     lecteur.feed(str(value or '')[:100000])
-
     return '\n'.join(
         re.sub(r'\s+', ' ', ligne).strip()
         for ligne in ''.join(lecteur.morceaux).splitlines()
@@ -71,557 +59,214 @@ def texte_description(value):
 
 
 def _normaliser(texte):
-    texte = ''.join(
-        caractere
-        for caractere in unicodedata.normalize(
-            'NFKD',
-            texte.lower(),
-        )
-        if not unicodedata.combining(caractere)
-    )
-
-    return re.sub(
-        r'\s+',
-        ' ',
-        texte.replace('’', "'").replace('‑', '-').replace('–', '-'),
-    ).strip()
+    texte = ''.join(c for c in unicodedata.normalize('NFKD', texte.lower())
+                    if not unicodedata.combining(c))
+    return re.sub(r'\s+', ' ', texte.replace('’', "'").replace('‑', '-').replace('–', '-')).strip()
 
 
 def charger_annonce_bienici(url):
     canonique = extraire_url_bienici(url)
-
     if not canonique:
-        raise LectureImpossible(
-            'Cette URL ne désigne pas une annonce Bien’ici reconnue.'
-        )
-
+        raise LectureImpossible('Cette URL ne désigne pas une annonce Bien’ici reconnue.')
     identifiant = urlsplit(canonique).path.rsplit('/', 1)[-1]
-
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,240}', identifiant):
-        raise LectureImpossible(
-            'Identifiant Bien’ici non reconnu.'
-        )
-
-    endpoint = (
-        'https://www.bienici.com/realEstateAd.json?id='
-        + quote(identifiant, safe='')
-    )
-
-    request = Request(
-        endpoint,
-        headers={
-            'Accept': 'application/json',
-            'User-Agent': 'ChasseurImmo/1.0',
-        },
-    )
-
+        raise LectureImpossible('Identifiant Bien’ici non reconnu.')
+    # Même ressource JSON que celle appelée par la page publique Bien’ici.
+    endpoint = 'https://www.bienici.com/realEstateAd.json?id=' + quote(identifiant, safe='')
+    request = Request(endpoint, headers={
+        'Accept': 'application/json',
+        'User-Agent': 'ChasseurImmo/1.0',
+    })
     try:
-        with build_opener(_SansRedirection()).open(
-            request,
-            timeout=10,
-        ) as response:
+        with build_opener(_SansRedirection()).open(request, timeout=10) as response:
             if response.status != 200:
-                raise LectureImpossible(
-                    'Descriptif Bien’ici indisponible.'
-                )
-
-            if 'json' not in (
-                response.headers.get('Content-Type') or ''
-            ).lower():
-                raise LectureImpossible(
-                    'Bien’ici n’a pas fourni les données attendues.'
-                )
-
+                raise LectureImpossible('Descriptif Bien’ici indisponible.')
+            if 'json' not in (response.headers.get('Content-Type') or '').lower():
+                raise LectureImpossible('Bien’ici n’a pas fourni les données attendues.')
             contenu = response.read(1500001)
-
         if len(contenu) > 1500000:
-            raise LectureImpossible(
-                'Réponse Bien’ici trop volumineuse.'
-            )
-
+            raise LectureImpossible('Réponse Bien’ici trop volumineuse.')
         donnees = json.loads(contenu)
-
     except HTTPError as exc:
-        raise LectureImpossible(
-            f'Bien’ici indisponible (HTTP {exc.code}).'
-        ) from exc
-
+        raise LectureImpossible(f'Bien’ici indisponible (HTTP {exc.code}).') from exc
     except (URLError, TimeoutError, OSError, ValueError) as exc:
-        raise LectureImpossible(
-            'Lecture du descriptif Bien’ici impossible.'
-        ) from exc
-
-    if (
-        not isinstance(donnees, dict)
-        or donnees.get('id') != identifiant
-    ):
-        raise LectureImpossible(
-            'L’identité de l’annonce reçue ne correspond pas au lien.'
-        )
-
+        raise LectureImpossible('Lecture du descriptif Bien’ici impossible.') from exc
+    if not isinstance(donnees, dict) or donnees.get('id') != identifiant:
+        raise LectureImpossible('L’identité de l’annonce reçue ne correspond pas au lien.')
     if donnees.get('adType') != 'buy':
-        raise LectureImpossible(
-            'Cette annonce n’est pas une vente reconnue.'
-        )
-
-    if (
-        not isinstance(donnees.get('description'), str)
-        or not donnees['description'].strip()
-    ):
-        raise LectureImpossible(
-            'Le descriptif de cette annonce est absent.'
-        )
-
+        raise LectureImpossible('Cette annonce n’est pas une vente reconnue.')
+    if not isinstance(donnees.get('description'), str) or not donnees['description'].strip():
+        raise LectureImpossible('Le descriptif de cette annonce est absent.')
     return donnees
 
 
-NOMBRES = {
-    'un': 1,
-    'une': 1,
-    'deux': 2,
-    'trois': 3,
-    'quatre': 4,
-    'cinq': 5,
-    'six': 6,
-    'sept': 7,
-    'huit': 8,
-    'neuf': 9,
-    'dix': 10,
-}
-
-COMPTE = (
-    r'(\d{1,2}|un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix)'
-)
-
-CHAMBRE = re.compile(
-    r'\b'
-    + COMPTE
-    + r'\s+(?:(?:belles?|grandes?|petites?|vastes?)\s+)*chambres?\b'
-)
-
+NOMBRES = {'un': 1, 'une': 1, 'deux': 2, 'trois': 3, 'quatre': 4,
+           'cinq': 5, 'six': 6, 'sept': 7, 'huit': 8, 'neuf': 9, 'dix': 10}
+COMPTE = r'(\d{1,2}|un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix)'
+CHAMBRE = re.compile(r'\b' + COMPTE + r'\s+(?:(?:belles?|grandes?|petites?|vastes?)\s+)*chambres?\b')
 RDC = r'(?:rdc|rez[ -]de[ -]chaussee)'
-
-ETAGE = (
-    r'(?:(?:\d+(?:er|eme|e)?|premier|deuxieme|second|troisieme)'
-    r'\s*etage|etage|sous[ -]sol|combles)'
-)
-
-NIVEAU = re.compile(
-    r"\b(?:au\s+|a\s+l[' ]|a\s+|le\s+|en\s+)("
-    + RDC
-    + '|'
-    + ETAGE
-    + r')\b|\b('
-    + RDC
-    + '|'
-    + ETAGE
-    + r')\s*:'
-)
-
-HYPOTHESE = re.compile(
-    r"\b(?:possibilites?|possibles?|potentiel\w*|pourr\w*|"
-    r"pouvant|pouvez|peut|creation|creer|construire|amenageables?|"
-    r"transform\w*|projet\w*|envisag\w*|futur\w*)\b"
-    r"|\ba amenager\b"
-)
+ETAGE = r'(?:(?:\d+(?:er|eme|e)?|premier|deuxieme|second|troisieme)\s*etage|etage|sous[ -]sol|combles)'
+NIVEAU = re.compile(r"\b(?:au\s+|a\s+l[' ]|a\s+|le\s+|en\s+)(" + RDC + '|' + ETAGE + r')\b|\b(' + RDC + '|' + ETAGE + r')\s*:')
+HYPOTHESE = re.compile(r"\b(?:possibilites?|possibles?|potentiel\w*|pourr\w*|pouvant|pouvez|peut|creation|creer|construire|amenageables?|transform\w*|projet\w*|envisag\w*|futur\w*)\b|\ba amenager\b")
 
 
 def _compter(texte):
-    if HYPOTHESE.search(texte) or re.search(
-        r'\b(?:chambre\s*(?:/|ou)\s*bureau|'
-        r'bureau\s*(?:/|ou)\s*chambre)\b',
-        texte,
-    ):
+    if HYPOTHESE.search(texte) or re.search(r'\b(?:chambre\s*(?:/|ou)\s*bureau|bureau\s*(?:/|ou)\s*chambre)\b', texte):
         return None
-
-    if re.search(
-        r"\b(?:sans|aucune|pas de)\s+chambres?\b",
-        texte,
-    ):
+    if re.search(r"\b(?:sans|aucune|pas de)\s+chambres?\b", texte):
         return 0
-
-    valeurs = [
-        int(match.group(1))
-        if match.group(1).isdigit()
-        else NOMBRES[match.group(1)]
-        for match in CHAMBRE.finditer(texte)
-    ]
-
-    # Ne pas additionner des groupes qui peuvent se recouper.
-    if (
-        len(valeurs) == 1
-        and len(re.findall(r'\bchambres?\b', texte)) == 1
-    ):
+    valeurs = [int(m.group(1)) if m.group(1).isdigit() else NOMBRES[m.group(1)]
+               for m in CHAMBRE.finditer(texte)]
+    # Plusieurs groupes peuvent se recouper (« 3 chambres dont une... »).
+    # Ne pas les additionner ou choisir arbitrairement un nombre.
+    if len(valeurs) == 1 and len(re.findall(r'\bchambres?\b', texte)) == 1:
         return valeurs[0]
-
-    if (
-        not valeurs
-        and len(re.findall(r'\bchambre\b', texte)) == 1
-    ):
+    if not valeurs and len(re.findall(r'\bchambre\b', texte)) == 1:
         return 1
-
     return None
 
 
 def analyser_criteres(donnees):
-    description = texte_description(
-        donnees.get('description')
-    )
-
+    description = texte_description(donnees.get('description'))
     texte = _normaliser(description)
-
-    texte = re.split(
-        r'les informations sur les risques|honoraires|contactez votre',
-        texte,
-    )[0]
-
-    preuves = {
-        champ: []
-        for champ in CHAMPS
-    }
+    texte = re.split(r'les informations sur les risques|honoraires|contactez votre', texte)[0]
+    preuves = {champ: [] for champ in CHAMPS}
 
     def ajouter(champ, valeur, extrait):
         if valeur is not None:
-            preuves[champ].append(
-                {
-                    'valeur': valeur,
-                    'extrait': extrait[:600],
-                }
-            )
+            preuves[champ].append({'valeur': valeur, 'extrait': extrait[:600]})
 
     chambres = donnees.get('bedroomsQuantity')
-
-    if (
-        isinstance(chambres, int)
-        and not isinstance(chambres, bool)
-        and 0 <= chambres <= 30
-    ):
-        ajouter(
-            'chambres',
-            chambres,
-            'Nombre de chambres déclaré par Bien’ici.',
-        )
-
+    if isinstance(chambres, int) and not isinstance(chambres, bool) and 0 <= chambres <= 30:
+        ajouter('chambres', chambres, 'Nombre de chambres déclaré par Bien’ici.')
     if isinstance(donnees.get('hasGarage'), bool):
-        ajouter(
-            'garage',
-            donnees['hasGarage'],
-            'Présence du garage déclarée par Bien’ici.',
-        )
+        ajouter('garage', donnees['hasGarage'], 'Présence du garage déclarée par Bien’ici.')
 
     premier_niveau = NIVEAU.search(texte)
-
-    introduction = (
-        texte[:premier_niveau.start()]
-        if premier_niveau
-        else texte
-    )
-
+    introduction = texte[:premier_niveau.start()] if premier_niveau else texte
     if not preuves['chambres']:
-        for phrase in re.split(
-            r'[.!?;]\s+|\n+',
-            introduction,
-        ):
+        for phrase in re.split(r'[.!?;]\s+|\n+', introduction):
             if CHAMBRE.search(phrase):
-                ajouter(
-                    'chambres',
-                    _compter(phrase),
-                    phrase,
-                )
+                ajouter('chambres', _compter(phrase), phrase)
 
-    # Reconnaître un espace nuit décrit après le niveau.
-    # Une autre mention de chambre pourrait correspondre
-    # à un autre niveau : dans ce cas, ne pas déduire le total.
-    if (
-        not preuves['chambres']
-        and len(re.findall(r'\bchambres?\b', texte)) == 1
-    ):
+    # Un espace nuit décrit explicitement peut être présenté après l’étage.
+    # N’en tirer un total que s’il n’y a aucune autre mention de chambre :
+    # on évite de prendre un seul niveau pour le total de toute la maison.
+    if not preuves['chambres'] and len(re.findall(r'\bchambres?\b', texte)) == 1:
         for phrase in re.split(r'[.!?;]\s+', texte):
             espace_nuit = re.search(
                 r"\b(?:espace|partie|coin)\s+nuit\s+"
                 r"(?:se compose de|comprend|comporte|offre|dispose de)\s+",
                 phrase,
             )
-
             if espace_nuit and CHAMBRE.search(phrase):
-                ajouter(
-                    'chambres',
-                    _compter(phrase),
-                    phrase,
-                )
+                ajouter('chambres', _compter(phrase), phrase)
 
+    # Les mentions d’équipements sont lues séparément, sans convertir
+    # une place de parking ou un carport en garage.
     for phrase in re.split(r'[.!?;]\s+', texte):
-        # Une surface habitable répartie sur plusieurs niveaux
-        # ne correspond pas à un bien entièrement de plain-pied.
-        if (
-            not HYPOTHESE.search(phrase)
-            and re.search(
-                r'\bsurface\s+habitable\b.{0,100}'
-                r'\breparti(?:es|e|s)?\s+sur\s+'
-                r'(?:deux|2|trois|3)\s+niveaux\b',
-                phrase,
-            )
+        if not HYPOTHESE.search(phrase) and re.search(
+            r'\bsurface\s+habitable\b.{0,100}\breparti(?:es|e|s)?\s+sur\s+'
+            r'(?:deux|2|trois|3)\s+niveaux\b', phrase
         ):
-            ajouter(
-                'plain_pied',
-                False,
-                phrase,
-            )
-
+            ajouter('plain_pied', False, phrase)
         if re.search(r'\bgarage\b', phrase):
-            negatif = re.search(
-                r"\b(?:sans|aucun|pas de|absence de)"
-                r"\s+(?:(?:un|grand|petit)\s+)*garage\b",
-                phrase,
-            )
-
+            negatif = re.search(r"\b(?:sans|aucun|pas de|absence de)\s+(?:(?:un|grand|petit)\s+)*garage\b", phrase)
             if negatif:
                 ajouter('garage', False, phrase)
-
-            elif (
-                not HYPOTHESE.search(phrase)
-                and not re.search(
-                    r'\bancien\s+garage\b|\bgarage\s+automobile\b',
-                    phrase,
-                )
-            ):
+            elif not HYPOTHESE.search(phrase) and not re.search(r'\bancien\s+garage\b|\bgarage\s+automobile\b', phrase):
                 ajouter('garage', True, phrase)
-
         if re.search(r'\bplain[ -]pied\b', phrase):
-            if re.search(
-                r"(?:pas\s+(?:de\s+)?|non[ -])plain[ -]pied",
-                phrase,
-            ):
+            if re.search(r"(?:pas\s+(?:de\s+)?|non[ -])plain[ -]pied", phrase):
                 ajouter('plain_pied', False, phrase)
-
             elif (
                 not HYPOTHESE.search(phrase)
-                and not re.search(
-                    r'\b(?:vie|vivre|espace|partie)\b'
-                    r'.{0,30}plain[ -]pied',
-                    phrase,
-                )
-                and re.search(
-                    r'\b(?:maison|pavillon|habitation)\s+'
-                    r'(?:(?:entierement|totalement|de|est)\s+)*'
-                    r'plain[ -]pied\b',
-                    phrase,
-                )
+                and not re.search(r'\b(?:vie|vivre|espace|partie)\b.{0,30}plain[ -]pied', phrase)
+                and re.search(r'\b(?:maison|pavillon|habitation)\s+(?:(?:entierement|totalement|de|est)\s+)*plain[ -]pied\b', phrase)
             ):
                 ajouter('plain_pied', True, phrase)
 
-    # Repérer les caractéristiques explicitement situées au RDC.
+    # Un niveau reste actif jusqu’à l’annonce du niveau suivant.
+    # Aucune absence n’est déduite d’une simple omission dans la liste.
     niveaux = list(NIVEAU.finditer(texte))
     segments_rdc = []
-
     for i, match in enumerate(niveaux):
         niveau = match.group(1) or match.group(2)
-
         if not re.fullmatch(RDC, niveau):
             continue
-
-        fin = (
-            niveaux[i + 1].start()
-            if i + 1 < len(niveaux)
-            else len(texte)
-        )
-
+        fin = niveaux[i + 1].start() if i + 1 < len(niveaux) else len(texte)
         segment = texte[match.end():fin]
-
-        prochain_est_titre = (
-            i + 1 < len(niveaux)
-            and texte[niveaux[i + 1].end():]
-            .lstrip()
-            .startswith(':')
-        )
-
-        if (
-            i + 1 < len(niveaux)
-            and not prochain_est_titre
-            and segment.strip()
-            and not re.search(r'[.;!?:]\s*$', segment)
-        ):
-            coupures = list(
-                re.finditer(r'[.;!?]\s+', segment)
-            )
-
-            segment = (
-                segment[:coupures[-1].end()]
-                if coupures
-                else ''
-            )
-
+        prochain_est_titre = i + 1 < len(niveaux) and texte[niveaux[i + 1].end():].lstrip().startswith(':')
+        if i + 1 < len(niveaux) and not prochain_est_titre and segment.strip() and not re.search(r'[.;!?:]\s*$', segment):
+            # « Une chambre à l’étage » : cette chambre précède le marqueur
+            # du nouvel étage ; elle ne doit pas être attribuée au RDC.
+            coupures = list(re.finditer(r'[.;!?]\s+', segment))
+            segment = segment[:coupures[-1].end()] if coupures else ''
         segments_rdc.append(segment)
-
         for phrase in re.split(r'[.!?;]\s+', segment):
             if HYPOTHESE.search(phrase):
                 continue
-
             for champ, motif in (
-                (
-                    'salle_eau_rdc',
-                    r"salle\s+d[' ]eau|salle\s+de\s+douches?|sde|sdd",
-                ),
-                (
-                    'salle_bain_rdc',
-                    r'salle\s+de\s+bains?|sdb',
-                ),
+                ('salle_eau_rdc', r"salle\s+d[' ]eau|salle\s+de\s+douches?|sde|sdd"),
+                ('salle_bain_rdc', r'salle\s+de\s+bains?|sdb'),
             ):
-                cible = re.search(
-                    r'\b(?:' + motif + r')\b',
-                    phrase,
-                )
-
+                cible = re.search(r'\b(?:' + motif + r')\b', phrase)
                 if cible:
-                    avant = phrase[
-                        max(0, cible.start() - 25):cible.start()
-                    ]
-
-                    absent = bool(
-                        re.search(
-                            r"(?:sans|aucune|pas de|absence de)"
-                            r"\s+(?:une\s+)?$",
-                            avant,
-                        )
-                    )
-
-                    ajouter(
-                        champ,
-                        not absent,
-                        phrase,
-                    )
-
+                    avant = phrase[max(0, cible.start() - 25):cible.start()]
+                    absent = bool(re.search(r"(?:sans|aucune|pas de|absence de)\s+(?:une\s+)?$", avant))
+                    ajouter(champ, not absent, phrase)
         compte = _compter(segment)
+        ajouter('chambres_rdc', compte, niveau + ' : ' + segment)
 
-        ajouter(
-            'chambres_rdc',
-            compte,
-            niveau + ' : ' + segment,
-        )
-
-    # Formulations avec le niveau après la caractéristique.
+    # Formulations explicites avec le niveau après la caractéristique.
     for phrase in re.split(r'[.!?;]\s+', texte):
         if HYPOTHESE.search(phrase):
             continue
-
         for match in re.finditer(
-            r'\b'
-            + COMPTE
-            + r'\s+chambres?\s+(?:situees?\s+)?au\s+'
-            + RDC
-            + r'\b',
-            phrase,
+            r'\b' + COMPTE + r'\s+chambres?\s+(?:situees?\s+)?au\s+' + RDC + r'\b', phrase
         ):
             valeur = match.group(1)
-
-            prefixe = phrase[
-                max(0, match.start() - 30):match.start()
-            ]
-
-            if not re.search(
-                r"(?:sans|pas de|aucune)\s*$",
-                prefixe,
-            ):
-                ajouter(
-                    'chambres_rdc',
-                    (
-                        int(valeur)
-                        if valeur.isdigit()
-                        else NOMBRES[valeur]
-                    ),
-                    phrase,
-                )
-
-        if re.search(
-            r'\b(?:aucune|pas de|sans)\s+chambre\s+au\s+' + RDC,
-            phrase,
-        ):
+            prefixe = phrase[max(0, match.start() - 30):match.start()]
+            if not re.search(r"(?:sans|pas de|aucune)\s*$", prefixe):
+                ajouter('chambres_rdc', int(valeur) if valeur.isdigit() else NOMBRES[valeur], phrase)
+        if re.search(r'\b(?:aucune|pas de|sans)\s+chambre\s+au\s+' + RDC, phrase):
             ajouter('chambres_rdc', 0, phrase)
-
         for champ, motif in (
-            (
-                'salle_eau_rdc',
-                r"salle\s+d[' ]eau|salle\s+de\s+douches?|sde|sdd",
-            ),
-            (
-                'salle_bain_rdc',
-                r'salle\s+de\s+bains?|sdb',
-            ),
+            ('salle_eau_rdc', r"salle\s+d[' ]eau|salle\s+de\s+douches?|sde|sdd"),
+            ('salle_bain_rdc', r'salle\s+de\s+bains?|sdb'),
         ):
-            match = re.search(
-                r'\b(?:'
-                + motif
-                + r')\s+(?:situee\s+)?au\s+'
-                + RDC
-                + r'\b',
-                phrase,
-            )
-
-            if match:
-                avant = phrase[
-                    max(0, match.start() - 25):match.start()
-                ]
-
-                absent = bool(
-                    re.search(
-                        r'(?:sans|aucune|pas de)\s+$',
-                        avant,
-                    )
-                )
-
-                ajouter(
-                    champ,
-                    not absent,
-                    phrase,
-                )
+            m = re.search(r'\b(?:' + motif + r')\s+(?:situee\s+)?au\s+' + RDC + r'\b', phrase)
+            if m:
+                avant = phrase[max(0, m.start() - 25):m.start()]
+                absent = bool(re.search(r'(?:sans|aucune|pas de)\s+$', avant))
+                ajouter(champ, not absent, phrase)
 
     resultat = {}
     traces = {}
-
     for champ, observations in preuves.items():
-        valeurs = {
-            preuve['valeur']
-            for preuve in observations
-        }
-
+        valeurs = {p['valeur'] for p in observations}
         if len(valeurs) == 1:
             resultat[champ] = observations[0]['valeur']
             traces[champ] = observations
-
         elif observations:
-            traces[champ] = [
-                {
-                    'valeur': None,
-                    'extrait': 'Mentions contradictoires : à vérifier.',
-                }
-            ]
-
-    if (
-        resultat.get('chambres') is not None
-        and resultat.get('chambres_rdc') is not None
-        and resultat['chambres_rdc'] > resultat['chambres']
-    ):
+            traces[champ] = [{'valeur': None, 'extrait': 'Mentions contradictoires : à vérifier.'}]
+    complements, preuves_complementaires = extraire_informations(description)
+    for champ, valeur in complements.items():
+        if champ not in resultat:
+            resultat[champ] = valeur
+            traces[champ] = preuves_complementaires[champ]
+    for champ, preuves_champ in preuves_complementaires.items():
+        traces.setdefault(champ, preuves_champ)
+    if (resultat.get('chambres') is not None and resultat.get('chambres_rdc') is not None
+            and resultat['chambres_rdc'] > resultat['chambres']):
         resultat.pop('chambres_rdc')
-
-        traces['chambres_rdc'] = [
-            {
-                'valeur': None,
-                'extrait': (
-                    'Nombre au RDC supérieur au total : à vérifier.'
-                ),
-            }
-        ]
-
+        traces['chambres_rdc'] = [{'valeur': None, 'extrait': 'Nombre au RDC supérieur au total : à vérifier.'}]
     resultat['extraction_criteres'] = {
-        'version': VERSION,
-        'date': datetime.now(timezone.utc).isoformat(),
-        'source': 'Bien’ici',
-        'preuves': traces,
+        'version': VERSION, 'date': datetime.now(timezone.utc).isoformat(),
+        'source': 'Bien’ici', 'preuves': traces,
     }
-
     if description:
         resultat['description'] = description
-
     return resultat
 
 
@@ -629,51 +274,21 @@ def completer_annonce(db, bien, charger=None, force=False):
     """Compléter les champs inconnus sans écraser les saisies existantes."""
     if not extraire_url_bienici(bien.get('url')):
         return bien, False
-
     trace = bien.get('extraction_criteres') or {}
-
     if not force and trace.get('version') == VERSION:
         return bien, False
-
-    donnees = (
-        charger or charger_annonce_bienici
-    )(bien['url'])
-
+    donnees = (charger or charger_annonce_bienici)(bien['url'])
     valeurs = analyser_criteres(donnees)
     changements = {}
-
     for champ, valeur in valeurs.items():
-        if (
-            champ == 'extraction_criteres'
-            or bien.get(champ) is None
-            or bien.get(champ) == ''
-        ):
+        if champ == 'extraction_criteres' or bien.get(champ) is None or bien.get(champ) == '':
             changements[champ] = valeur
-
-    total = (
-        bien.get('chambres')
-        if bien.get('chambres') is not None
-        else changements.get('chambres')
-    )
-
+    total = bien.get('chambres') if bien.get('chambres') is not None else changements.get('chambres')
     rdc = changements.get('chambres_rdc')
-
     if total is not None and rdc is not None and rdc > total:
         changements.pop('chambres_rdc')
-
         changements['extraction_criteres']['preuves']['chambres_rdc'] = [
-            {
-                'valeur': None,
-                'extrait': (
-                    'Incompatible avec le total déjà enregistré : à vérifier.'
-                ),
-            }
+            {'valeur': None, 'extrait': 'Incompatible avec le total déjà enregistré : à vérifier.'}
         ]
-
-    nouvelle = db.enregistrer(
-        'annonces',
-        changements,
-        bien['id'],
-    )
-
+    nouvelle = db.enregistrer('annonces', changements, bien['id'])
     return nouvelle, True
