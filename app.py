@@ -213,6 +213,8 @@ def editeur(db, acheteurs=False):
         st.caption(f'{len(rows)} fiche(s). Sélectionnez une personne ou créez une nouvelle fiche.')
     else:
         rows = filtrer_annonces(rows)
+        from suppression_annonces import afficher_suppression_groupee
+        afficher_suppression_groupee(db, rows)
     by_id = {str(x['id']): x for x in rows}
 
     def libelle(key):
